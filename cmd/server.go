@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
@@ -24,6 +25,9 @@ type serverconfig struct {
 
 var serverConfig serverconfig
 
+var version = "0"
+var description = "unknown"
+
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run Furan server",
@@ -40,6 +44,7 @@ func init() {
 
 func server(cmd *cobra.Command, args []string) {
 	setupVault()
+	setupVault()
 	certPath, keyPath := writeTLSCert()
 	defer rmTLSCert(certPath, keyPath)
 
@@ -53,6 +58,31 @@ func server(cmd *cobra.Command, args []string) {
 	server := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsconfig}
 	log.Printf("Listening on: %v", addr)
 	log.Println(server.ListenAndServeTLS(certPath, keyPath))
+}
+
+func setupVersion() {
+	bv := make([]byte, 20)
+	bd := make([]byte, 2048)
+	fv, err := os.Open("VERSION.txt")
+	if err != nil {
+		return
+	}
+	defer fv.Close()
+	sv, err := fv.Read(bv)
+	if err != nil {
+		return
+	}
+	fd, err := os.Open("DESCRIPTION.txt")
+	if err != nil {
+		return
+	}
+	defer fd.Close()
+	sd, err := fd.Read(bd)
+	if err != nil {
+		return
+	}
+	version = string(bv[:sv])
+	description = string(bd[:sd])
 }
 
 func runWorkers() {
