@@ -17,21 +17,20 @@ const (
 )
 
 type buildRequest struct {
-	SourceRepo     string `json:"source_repo"`
-	PrivateKeyPath string `json:"ssh_private_key_vault_path"`
-	SourceBranch   string `json:"source_branch"`
-	DockerRepo     string `json:"docker_repo"`
-	Tag            string `json:"tag"`
-	TagWithSHA     bool   `json:"tag_with_commit_sha"`
-	PullSquashed   bool   `json:"pull_squashed_image"`
+	SourceRepo   string `json:"source_repo"`
+	SourceBranch string `json:"source_branch"`
+	ImageRepo    string `json:"image_repo"`
+	Tag          string `json:"tag"`
+	TagWithSHA   bool   `json:"tag_with_commit_sha"`
+	PullSquashed bool   `json:"pull_squashed_image"`
 }
 
 type requestResponse struct {
-	BuildID string `json:"id"`
+	BuildID string `json:"build_id"`
 }
 
 type buildStatusResponse struct {
-	BuildID   string       `json:"id"`
+	BuildID   string       `json:"build_id"`
 	Request   buildRequest `json:"request"`
 	state     buildStatus
 	State     string `json:"state"`
