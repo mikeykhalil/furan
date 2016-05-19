@@ -1,6 +1,3 @@
-![Furan](https://sublimecuriosity.files.wordpress.com/2014/04/furan_structure.png)
-
-Furan
-=====
+![Furan](https://s3.amazonaws.com/dsc-misc/furan.jpg)
 
 Your anti-qwait solution
