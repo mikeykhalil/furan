@@ -15,7 +15,7 @@ Body:
   "source_repo": "https://github.com/dollarshaveclub/foobar",
   "source_branch": "master",
   "image_repo": "quay.io/dollarshaveclub/foobar",
-  "tag": "master",
+  "tags": ["master"],
   "tag_with_commit_sha": true,
   "pull_squashed_image": true  // https://docs.quay.io/guides/squashed-images.html
 }
@@ -36,12 +36,12 @@ Response:
 
 ```javascript
 {
-  "build_id": "{id}",
+  "build_id": "56aeda1c-6736-4657-8440-77972b103fee",
   "request": {
     "source_repo": "https://github.com/dollarshaveclub/foobar",
     "source_branch": "master",
     "image_repo": "quay.io/dollarshaveclub/foobar",
-    "tag": "master",
+    "tags": ["master"],
     "tag_with_commit_sha": true,
     "pull_squashed_image": true
   },

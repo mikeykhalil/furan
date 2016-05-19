@@ -17,12 +17,12 @@ const (
 )
 
 type buildRequest struct {
-	SourceRepo   string `json:"source_repo"`
-	SourceBranch string `json:"source_branch"`
-	ImageRepo    string `json:"image_repo"`
-	Tag          string `json:"tag"`
-	TagWithSHA   bool   `json:"tag_with_commit_sha"`
-	PullSquashed bool   `json:"pull_squashed_image"`
+	SourceRepo   string   `json:"source_repo"`
+	SourceBranch string   `json:"source_branch"`
+	ImageRepo    string   `json:"image_repo"`
+	Tags         []string `json:"tags"`
+	TagWithSHA   bool     `json:"tag_with_commit_sha"`
+	PullSquashed bool     `json:"pull_squashed_image"`
 }
 
 type requestResponse struct {

@@ -12,6 +12,7 @@ const (
 	vaultTLSKeyPath   = "secret/furan/tls/key"
 	vaultTLSCertPath  = "secret/furan/tls/cert"
 	sshPrivateKeyPath = "secret/furan/github/ssh_private_key"
+	sshPublicKeyPath  = "secret/furan/github/ssh_public_key"
 )
 
 func safeStringCast(v interface{}) string {
@@ -60,9 +61,14 @@ func setupVault() {
 	if err != nil {
 		log.Fatalf("Error getting SSH private key: %v", err)
 	}
+	pbk, err := vc.GetValue(sshPublicKeyPath)
+	if err != nil {
+		log.Fatalf("Error getting SSH public key: %v", err)
+	}
 	serverConfig.tlsCert = []byte(safeStringCast(cert))
 	serverConfig.tlsKey = []byte(safeStringCast(key))
-	githubConfig.privatekey = safeStringCast(pk)
+	gitConfig.privateKey = safeStringCast(pk)
+	gitConfig.publicKey = safeStringCast(pbk)
 }
 
 // TLS cert/key are retrieved from Vault and must be written to temp files
