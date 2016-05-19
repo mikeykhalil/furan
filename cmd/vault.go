@@ -94,12 +94,35 @@ func writeTLSCert() (string, string) {
 	return cf.Name(), kf.Name()
 }
 
-// Clean up TLS temp files
-func rmTLSCert(cp string, kp string) {
-	for _, v := range []string{cp, kp} {
+// Clean up temp files
+func rmTempFiles(f1 string, f2 string) {
+	for _, v := range []string{f1, f2} {
 		err := os.Remove(v)
 		if err != nil {
 			log.Printf("Error removing file: %v", v)
 		}
 	}
+}
+
+// SSH keypair must be written to temp files
+func writeSSHKeypair() (string, string) {
+	bf, err := ioutil.TempFile("", "ssh-pubkey")
+	if err != nil {
+		log.Fatalf("Error creating SSH pubkey temp file: %v", err)
+	}
+	defer bf.Close()
+	_, err = bf.Write([]byte(gitConfig.publicKey))
+	if err != nil {
+		log.Fatalf("Error writing SSH pubkey temp file: %v", err)
+	}
+	vf, err := ioutil.TempFile("", "ssh-privkey")
+	if err != nil {
+		log.Fatalf("Error creating SSH privkey temp file: %v", err)
+	}
+	defer vf.Close()
+	_, err = vf.Write([]byte(gitConfig.privateKey))
+	if err != nil {
+		log.Fatalf("Error writing SSH privkey temp file: %v", err)
+	}
+	return bf.Name(), vf.Name()
 }

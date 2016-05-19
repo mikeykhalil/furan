@@ -16,21 +16,24 @@ type vaultconfig struct {
 }
 
 type gitconfig struct {
-	checkoutPath string // filesystem path to clone/checkout the repo
-	privateKey   string // SSH private key for repo checkout (pulled from Vault)
-	publicKey    string // SSH public key
+	checkoutPath     string // filesystem path to clone/checkout the repo
+	privateKey       string // SSH private key for repo checkout (pulled from Vault)
+	publicKey        string // SSH public key
+	privKeyLocalPath string
+	pubKeyLocalPath  string
 }
 
 var vaultConfig vaultconfig
 var gitConfig gitconfig
 
-// This represents the base command when called without any subcommands
+// RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "furan",
 	Short: "Docker image builder",
 	Long:  `API application to build Docker images on command`,
 }
 
+// Execute is the entry point for the app
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
 		fmt.Println(err)

@@ -46,7 +46,9 @@ func server(cmd *cobra.Command, args []string) {
 	setupVault()
 	setupVault()
 	certPath, keyPath := writeTLSCert()
-	defer rmTLSCert(certPath, keyPath)
+	gitConfig.pubKeyLocalPath, gitConfig.privKeyLocalPath = writeSSHKeypair()
+	defer rmTempFiles(certPath, keyPath)
+	defer rmTempFiles(gitConfig.pubKeyLocalPath, gitConfig.privKeyLocalPath)
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
