@@ -4,12 +4,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"golang.org/x/net/context"
 )
 
-var workerChan chan *buildRequest
+var workerChan chan *BuildRequest
 
 func buildWorker() {
 
+}
+
+type grpcServer struct {
+}
+
+func (gr *grpcServer) StartBuild(ctx context.Context, req *BuildRequest) (*BuildRequestResponse, error) {
+	return &BuildRequestResponse{}, nil
+}
+
+func (gr *grpcServer) GetBuildStatus(ctx context.Context, req *BuildStatusRequest) (*BuildStatusResponse, error) {
+	return &BuildStatusResponse{}, nil
+}
+
+func (gr *grpcServer) CancelBuild(ctx context.Context, req *BuildCancelRequest) (*BuildStatusResponse, error) {
+	return &BuildStatusResponse{}, nil
 }
 
 func buildRequestHandler(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package cmd;
+
+service FuranExecutor {
+  rpc StartBuild (BuildRequest) returns (BuildRequestResponse) {}
+  rpc GetBuildStatus (BuildStatusRequest) returns (BuildStatusResponse) {}
+  rpc CancelBuild (BuildCancelRequest) returns (BuildStatusResponse) {}
+}
+
+message GitRefDefinition {
+  string branch = 1;
+  string sha = 2;
+}
+
+message BuildDefinition {
+  string github_repo = 1;
+  GitRefDefinition ref = 2;
+  repeated string tags = 3;
+  bool tag_with_commit_sha = 4;
+}
+
+message PushRegistryDefinition {
+  string repo = 1;
+}
+
+message PushS3Definition {
+  string bucket = 1;
+  string key_prefix = 2;
+}
+
+message PushDefinition {
+  PushRegistryDefinition registry = 1;
+  PushS3Definition s3 = 2;
+}
+
+message BuildRequest {
+  BuildDefinition build = 1;
+  PushDefinition push = 2;
+}
+
+message BuildRequestResponse {
+  string build_id = 1;
+}
+
+message BuildStatusRequest {
+  string build_id = 1;
+}
+
+message BuildCancelRequest {
+  string build_id = 1;
+}
+
+message BuildStatusResponse {
+  enum BuildState {
+    BUILDING = 0;
+    PUSHING = 1;
+    SUCCESS = 2;
+    BUILD_FAILURE = 3;
+    PUSH_FAILURE = 4;
+  }
+  string build_id = 1;
+  BuildRequest build_request = 2;
+  BuildState state = 3;
+  bool finished = 4;
+  bool failed = 5;
+  bool canceled = 6;
+  string started = 7;
+  string completed = 8;
+  uint64 duration = 9;
+}
