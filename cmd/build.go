@@ -2,18 +2,29 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
+	"golang.org/x/net/context"
+
 	"github.com/dollarshaveclub/go-lib/httpreq"
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/spf13/cobra"
 )
 
-var cliBuildRequest buildRequest
+var cliBuildRequest = BuildRequest{
+	Build: &BuildDefinition{
+		Ref: &GitRefDefinition{},
+	},
+	Push: &PushDefinition{
+		Registry: &PushRegistryDefinition{},
+		S3:       &PushS3Definition{},
+	},
+}
 var tags string
 var remoteURL string
+var ghtoken string
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
@@ -24,28 +35,25 @@ to the specified image repository.`,
 }
 
 func init() {
-	buildCmd.PersistentFlags().StringVarP(&cliBuildRequest.SourceRepo, "source-repo", "s", "", "source git repo")
-	buildCmd.PersistentFlags().StringVarP(&cliBuildRequest.SourceBranch, "source-branch", "b", "master", "source git branch")
-	buildCmd.PersistentFlags().StringVarP(&cliBuildRequest.ImageRepo, "image-repo", "i", "", "push to image repo")
-	buildCmd.PersistentFlags().StringVarP(&tags, "tags", "t", "master", "image tags (comma-delimited)")
-	buildCmd.PersistentFlags().BoolVarP(&cliBuildRequest.TagWithSHA, "tag-sha", "x", false, "additionally tag with git commit SHA")
-	buildCmd.PersistentFlags().BoolVarP(&cliBuildRequest.PullSquashed, "pull-squashed", "q", false, "after pushing, pull squashed image to prime cache (only supported by quay.io image repositories)")
-	buildCmd.PersistentFlags().StringVarP(&remoteURL, "remote-url", "r", "", "Remote URL of Furan server (otherwise build locally)")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.GithubRepo, "github-repo", "", "source github repo")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref.Branch, "source-branch", "master", "source git branch")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref.Sha, "source-sha", "", "source git commit SHA")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.Registry.Repo, "image-repo", "", "push to image repo")
+	buildCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (comma-delimited)")
+	buildCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA")
+	buildCmd.PersistentFlags().StringVar(&remoteURL, "remote-url", "", "Remote URL of Furan server (otherwise build locally)")
 	RootCmd.AddCommand(buildCmd)
 }
 
 func build(cmd *cobra.Command, args []string) {
-	cliBuildRequest.Tags = strings.Split(tags, ",")
+	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
 	if remoteURL == "" {
-		gitConfig.pubKeyLocalPath, gitConfig.privKeyLocalPath = writeSSHKeypair()
-		defer rmTempFiles(gitConfig.pubKeyLocalPath, gitConfig.privKeyLocalPath)
-
-		builder, err := NewImageBuilder()
+		builder, err := NewImageBuilder(gitConfig.token)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating builder: %v\n", err)
 			os.Exit(1)
 		}
-		err = builder.Build(&cliBuildRequest)
+		err = builder.Build(context.TODO(), cliBuildRequest.Build)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error building: %v\n", err)
 			os.Exit(1)
@@ -56,23 +64,23 @@ func build(cmd *cobra.Command, args []string) {
 }
 
 func remoteBuild() {
-	j, err := json.Marshal(&cliBuildRequest)
+	j, err := pbMarshaler.MarshalToString(&cliBuildRequest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error marshaling request: %v\n", err)
 		os.Exit(1)
 	}
 	url := fmt.Sprintf("%v/build", remoteURL)
 	headers := map[string]string{"Content-Type": "application/json"}
-	r, err := httpreq.HTTPRequest(url, "POST", bytes.NewBuffer(j), headers, true)
+	r, err := httpreq.HTTPRequest(url, "POST", bytes.NewBuffer([]byte(j)), headers, true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error triggering remote build: %v\n", err)
 		os.Exit(1)
 	}
-	resp := requestResponse{}
-	err = json.Unmarshal(r.BodyBytes, &resp)
+	resp := BuildRequestResponse{}
+	err = jsonpb.Unmarshal(bytes.NewBuffer(r.BodyBytes), &resp)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error unmarshaling response: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("build_id: %v\n", resp.BuildID)
+	fmt.Printf("build_id: %v\n", resp.BuildId)
 }

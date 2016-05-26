@@ -16,15 +16,14 @@ type vaultconfig struct {
 }
 
 type gitconfig struct {
-	checkoutPath     string // filesystem path to clone/checkout the repo
-	privateKey       string // SSH private key for repo checkout (pulled from Vault)
-	publicKey        string // SSH public key
-	privKeyLocalPath string
-	pubKeyLocalPath  string
+	checkoutPath string // filesystem path to clone/checkout the repo
+	token        string // GitHub token
 }
 
 var vaultConfig vaultconfig
 var gitConfig gitconfig
+var nodestr string
+var datacenterstr string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -48,4 +47,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.appID, "vault-app-id", "p", os.Getenv("APP_ID"), "Vault App-ID")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.userIDPath, "vault-user-id-path", "u", os.Getenv("USER_ID_PATH"), "Path to file containing Vault User-ID")
 	RootCmd.PersistentFlags().StringVarP(&gitConfig.checkoutPath, "checkout-path", "c", "/tmp/furan", "Local path where git repositories will be cloned")
+	RootCmd.PersistentFlags().BoolVarP(&dbConfig.useConsul, "consul-db-svc", "z", false, "Discover Cassandra nodes through Consul")
+	RootCmd.PersistentFlags().StringVarP(&dbConfig.consulServiceName, "svc-name", "v", "cassandra", "Consul service name for Cassandra")
+	RootCmd.PersistentFlags().StringVarP(&nodestr, "db-nodes", "n", "", "Comma-delimited list of Cassandra nodes (if not using Consul discovery)")
+	RootCmd.PersistentFlags().StringVarP(&datacenterstr, "db-dc", "d", "us-west-2", "Comma-delimited list of Cassandra datacenters (if not using Consul discovery)")
 }

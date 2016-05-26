@@ -9,10 +9,9 @@ import (
 )
 
 const (
-	vaultTLSKeyPath   = "secret/furan/tls/key"
-	vaultTLSCertPath  = "secret/furan/tls/cert"
-	sshPrivateKeyPath = "secret/furan/github/ssh_private_key"
-	sshPublicKeyPath  = "secret/furan/github/ssh_public_key"
+	vaultTLSKeyPath  = "secret/production/furan/tls/key"
+	vaultTLSCertPath = "secret/production/furan/tls/cert"
+	githubTokenPath  = "secret/production/furan/github/token"
 )
 
 func safeStringCast(v interface{}) string {
@@ -57,18 +56,13 @@ func setupVault() {
 	if err != nil {
 		log.Fatalf("Error getting TLS key: %v", err)
 	}
-	pk, err := vc.GetValue(sshPrivateKeyPath)
+	ght, err := vc.GetValue(githubTokenPath)
 	if err != nil {
-		log.Fatalf("Error getting SSH private key: %v", err)
-	}
-	pbk, err := vc.GetValue(sshPublicKeyPath)
-	if err != nil {
-		log.Fatalf("Error getting SSH public key: %v", err)
+		log.Fatalf("Error getting GitHub token: %v", err)
 	}
 	serverConfig.tlsCert = []byte(safeStringCast(cert))
 	serverConfig.tlsKey = []byte(safeStringCast(key))
-	gitConfig.privateKey = safeStringCast(pk)
-	gitConfig.publicKey = safeStringCast(pbk)
+	gitConfig.token = safeStringCast(ght)
 }
 
 // TLS cert/key are retrieved from Vault and must be written to temp files
@@ -102,27 +96,4 @@ func rmTempFiles(f1 string, f2 string) {
 			log.Printf("Error removing file: %v", v)
 		}
 	}
-}
-
-// SSH keypair must be written to temp files
-func writeSSHKeypair() (string, string) {
-	bf, err := ioutil.TempFile("", "ssh-pubkey")
-	if err != nil {
-		log.Fatalf("Error creating SSH pubkey temp file: %v", err)
-	}
-	defer bf.Close()
-	_, err = bf.Write([]byte(gitConfig.publicKey))
-	if err != nil {
-		log.Fatalf("Error writing SSH pubkey temp file: %v", err)
-	}
-	vf, err := ioutil.TempFile("", "ssh-privkey")
-	if err != nil {
-		log.Fatalf("Error creating SSH privkey temp file: %v", err)
-	}
-	defer vf.Close()
-	_, err = vf.Write([]byte(gitConfig.privateKey))
-	if err != nil {
-		log.Fatalf("Error writing SSH privkey temp file: %v", err)
-	}
-	return bf.Name(), vf.Name()
 }

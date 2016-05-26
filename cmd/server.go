@@ -16,8 +16,10 @@ const (
 )
 
 type serverconfig struct {
-	port        uint
-	addr        string
+	httpsPort   uint
+	grpcPort    uint
+	httpsAddr   string
+	grpcAddr    string
 	concurrency uint
 	tlsCert     []byte
 	tlsKey      []byte
@@ -36,29 +38,32 @@ var serverCmd = &cobra.Command{
 }
 
 func init() {
-	serverCmd.PersistentFlags().UintVarP(&serverConfig.port, "port", "p", 4000, "TCP port")
-	serverCmd.PersistentFlags().StringVarP(&serverConfig.addr, "addr", "a", "0.0.0.0", "listen addr")
-	serverCmd.PersistentFlags().UintVarP(&serverConfig.concurrency, "concurrency", "c", 10, "Max concurrent builds")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.httpsPort, "https-port", 4000, "REST HTTPS TCP port")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.grpcPort, "grpc-port", 4001, "gRPC TCP port")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.httpsAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.grpcAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.concurrency, "concurrency", 10, "Max concurrent builds")
 	RootCmd.AddCommand(serverCmd)
 }
 
 func server(cmd *cobra.Command, args []string) {
 	setupVault()
-	setupVault()
+	setupDB()
 	certPath, keyPath := writeTLSCert()
-	gitConfig.pubKeyLocalPath, gitConfig.privKeyLocalPath = writeSSHKeypair()
 	defer rmTempFiles(certPath, keyPath)
-	defer rmTempFiles(gitConfig.pubKeyLocalPath, gitConfig.privKeyLocalPath)
+
+	go listenRPC()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
 	r.HandleFunc("/build", buildRequestHandler).Methods("POST")
 	r.HandleFunc("/build/{id}", buildStatusHandler).Methods("GET")
+	r.HandleFunc("/build/{id}", buildCancelHandler).Methods("DELETE")
 
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	addr := fmt.Sprintf("%v:%v", serverConfig.addr, serverConfig.port)
+	addr := fmt.Sprintf("%v:%v", serverConfig.httpsAddr, serverConfig.httpsPort)
 	server := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsconfig}
-	log.Printf("Listening on: %v", addr)
+	log.Printf("HTTPS REST listening on: %v", addr)
 	log.Println(server.ListenAndServeTLS(certPath, keyPath))
 }
 
@@ -88,7 +93,7 @@ func setupVersion() {
 }
 
 func runWorkers() {
-	workerChan = make(chan *buildRequest, workerBufferSize)
+	workerChan = make(chan *BuildRequest, workerBufferSize)
 	log.Printf("running %v workers (buffer: %v)", serverConfig.concurrency, workerBufferSize)
 	for i := 0; uint(i) < serverConfig.concurrency; i++ {
 		go buildWorker()

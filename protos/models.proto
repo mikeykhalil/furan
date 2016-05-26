@@ -67,5 +67,5 @@ message BuildStatusResponse {
   bool canceled = 6;
   string started = 7;
   string completed = 8;
-  uint64 duration = 9;
+  int32 duration = 9;
 }
