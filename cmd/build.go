@@ -6,17 +6,13 @@ import (
 	"os"
 	"strings"
 
-	"golang.org/x/net/context"
-
 	"github.com/dollarshaveclub/go-lib/httpreq"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/spf13/cobra"
 )
 
 var cliBuildRequest = BuildRequest{
-	Build: &BuildDefinition{
-		Ref: &GitRefDefinition{},
-	},
+	Build: &BuildDefinition{},
 	Push: &PushDefinition{
 		Registry: &PushRegistryDefinition{},
 		S3:       &PushS3Definition{},
@@ -36,8 +32,7 @@ to the specified image repository.`,
 
 func init() {
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.GithubRepo, "github-repo", "", "source github repo")
-	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref.Branch, "source-branch", "master", "source git branch")
-	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref.Sha, "source-sha", "", "source git commit SHA")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref, "source-ref", "master", "source git ref")
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.Registry.Repo, "image-repo", "", "push to image repo")
 	buildCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (comma-delimited)")
 	buildCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA")
@@ -48,16 +43,6 @@ func init() {
 func build(cmd *cobra.Command, args []string) {
 	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
 	if remoteURL == "" {
-		builder, err := NewImageBuilder(gitConfig.token)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error creating builder: %v\n", err)
-			os.Exit(1)
-		}
-		err = builder.Build(context.TODO(), cliBuildRequest.Build)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error building: %v\n", err)
-			os.Exit(1)
-		}
 	} else {
 		remoteBuild()
 	}

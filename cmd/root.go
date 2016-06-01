@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -8,20 +9,36 @@ import (
 )
 
 type vaultconfig struct {
-	addr       string
-	token      string
-	tokenAuth  bool
-	appID      string
-	userIDPath string
+	addr                 string
+	token                string
+	tokenAuth            bool
+	appID                string
+	userIDPath           string
+	vaultPathPrefix      string
+	vaultGitHubTokenPath string
 }
 
 type gitconfig struct {
-	checkoutPath string // filesystem path to clone/checkout the repo
-	token        string // GitHub token
+	tokenVaultPath string
+	checkoutPath   string // filesystem path to clone/checkout the repo
+	token          string // GitHub token
+}
+
+// struct to deserialize dockercfg into
+type dockerAuth struct {
+	Auth  string `json:"auth"`
+	Email string `json:"email"`
+}
+
+type dockerconfig struct {
+	dockercfgPath     string
+	dockercfgContents map[string]dockerAuth
 }
 
 var vaultConfig vaultconfig
 var gitConfig gitconfig
+var dockerConfig dockerconfig
+
 var nodestr string
 var datacenterstr string
 
@@ -51,4 +68,26 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&dbConfig.consulServiceName, "svc-name", "v", "cassandra", "Consul service name for Cassandra")
 	RootCmd.PersistentFlags().StringVarP(&nodestr, "db-nodes", "n", "", "Comma-delimited list of Cassandra nodes (if not using Consul discovery)")
 	RootCmd.PersistentFlags().StringVarP(&datacenterstr, "db-dc", "d", "us-west-2", "Comma-delimited list of Cassandra datacenters (if not using Consul discovery)")
+	RootCmd.PersistentFlags().StringVarP(&vaultConfig.vaultPathPrefix, "vault-prefix", "x", "secret/production/furan", "Vault path prefix for secrets")
+	RootCmd.PersistentFlags().StringVarP(&gitConfig.tokenVaultPath, "github-token-path", "g", "github/token", "Vault path (appended to prefix) for GitHub token")
+	RootCmd.PersistentFlags().StringVarP(&dockerConfig.dockercfgPath, "dockercfg-path", "e", ".dockercfg", "Path to .dockercfg (registry push authentication)")
+}
+
+func isCancelled(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
+func readDockercfg() error {
+	f, err := os.Open(dockerConfig.dockercfgPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	d := json.NewDecoder(f)
+	return d.Decode(&dockerConfig.dockercfgContents)
 }

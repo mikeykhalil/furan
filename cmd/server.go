@@ -16,13 +16,15 @@ const (
 )
 
 type serverconfig struct {
-	httpsPort   uint
-	grpcPort    uint
-	httpsAddr   string
-	grpcAddr    string
-	concurrency uint
-	tlsCert     []byte
-	tlsKey      []byte
+	httpsPort        uint
+	grpcPort         uint
+	httpsAddr        string
+	grpcAddr         string
+	concurrency      uint
+	vaultTLSCertPath string
+	vaultTLSKeyPath  string
+	tlsCert          []byte
+	tlsKey           []byte
 }
 
 var serverConfig serverconfig
@@ -43,6 +45,8 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverConfig.httpsAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.grpcAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.concurrency, "concurrency", 10, "Max concurrent builds")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSCertPath, "tls-cert-path", "tls/cert", "Vault path to TLS certificate")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "tls/key", "Vault path to TLS private key")
 	RootCmd.AddCommand(serverCmd)
 }
 
@@ -51,6 +55,10 @@ func server(cmd *cobra.Command, args []string) {
 	setupDB()
 	certPath, keyPath := writeTLSCert()
 	defer rmTempFiles(certPath, keyPath)
+	err := readDockercfg()
+	if err != nil {
+		log.Fatalf("error reading dockercfg: %v", err)
+	}
 
 	go listenRPC()
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"golang.org/x/net/context"
@@ -16,7 +17,14 @@ import (
 	dtypes "github.com/docker/engine-api/types"
 )
 
-// ImageBuilder represents
+// RepoBuildData contains data about a GitHub repo necessary to do a Docker build
+type RepoBuildData struct {
+	DockerfileContents *string
+	ArchiveLink        *url.URL
+	Tags               []string //{name}:{tag}
+}
+
+// ImageBuilder is an object that builds and pushes images
 type ImageBuilder struct {
 	c  *docker.Client
 	gf *GitHubFetcher
@@ -34,44 +42,48 @@ func NewImageBuilder(ghtoken string) (*ImageBuilder, error) {
 	return ib, nil
 }
 
+// Returns full docker name:tag strings from the supplied repo/tags
+func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
+	var bname string
+	names := []string{}
+	if req.Push.Registry.Repo != "" {
+		bname = req.Push.Registry.Repo
+	} else {
+		bname = req.Build.GithubRepo
+	}
+	for _, t := range req.Build.Tags {
+		names = append(names, fmt.Sprintf("%v:%v", bname, t))
+	}
+	return names
+}
+
 // Build builds an image accourding to the request
-func (ib *ImageBuilder) Build(ctx context.Context, req *BuildDefinition) error {
-	var ref string
-	if req.Ref.Branch != "" {
-		ref = req.Ref.Branch
-	}
-	if req.Ref.Sha != "" {
-		ref = req.Ref.Sha
-	}
-	if ref == "" {
-		return fmt.Errorf("branch and sha are empty")
-	}
-	rl := strings.Split(req.GithubRepo, "/")
+func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest) error {
+	rl := strings.Split(req.Build.GithubRepo, "/")
 	if len(rl) != 2 {
-		return fmt.Errorf("malformed github repo: %v", req.GithubRepo)
+		return fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
 	}
 	owner := rl[0]
 	repo := rl[1]
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("build was cancelled")
-	default:
-		break
+	if isCancelled(ctx.Done()) {
+		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
-	rbi, err := ib.gf.Get(owner, repo, ".", ref)
+	dockerfile, archiveLink, err := ib.gf.Get(owner, repo, ".", req.Build.Ref)
 	if err != nil {
 		return err
+	}
+	rbi := &RepoBuildData{
+		DockerfileContents: dockerfile,
+		ArchiveLink:        archiveLink,
+		Tags:               ib.getFullImageNames(req),
 	}
 	return ib.dobuild(ctx, req, rbi)
 }
 
 // doBuild executes the archive file GET and triggers the Docker build
-func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildDefinition, rbi *RepoBuildData) error {
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("build was cancelled")
-	default:
-		break
+func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *RepoBuildData) error {
+	if isCancelled(ctx.Done()) {
+		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
 	hc := http.Client{}
 	hr, err := http.NewRequest("GET", rbi.ArchiveLink.String(), nil)
@@ -92,17 +104,17 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildDefinition, rbi *
 	}
 	defer gzr.Close()
 	opts := dtypes.ImageBuildOptions{
-		Tags:        req.Tags,
+		Tags:        rbi.Tags,
 		Remove:      true,
 		ForceRemove: true,
 		PullParent:  true,
-		Dockerfile:  rbi.DockerfileContents,
+		Dockerfile:  *rbi.DockerfileContents,
 	}
 	ibr, err := ib.c.ImageBuild(ctx, gzr, opts)
 	if err != nil {
 		return fmt.Errorf("error starting build: %v", err)
 	}
-	return ib.monitorBuild(ctx, ibr.Body)
+	return ib.monitorDockerAction(ctx, ibr.Body)
 }
 
 // Models for the JSON objects the Docker API returns
@@ -120,16 +132,12 @@ type dockerErrorEvent struct {
 	ErrorDetail dockerErrorDetail `json:"errorDetail"`
 }
 
-// monitorBuild reads the Docker API response stream and detects any errors
-func (ib *ImageBuilder) monitorBuild(ctx context.Context, rc io.ReadCloser) error {
-	done := ctx.Done()
+// monitorDockerAction reads the Docker API response stream and detects any errors
+func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser) error {
 	rdr := bufio.NewReader(rc)
 	for {
-		select {
-		case <-done:
-			return fmt.Errorf("build was cancelled")
-		default:
-			break
+		if isCancelled(ctx.Done()) {
+			return fmt.Errorf("action was cancelled: %v", ctx.Err())
 		}
 		line, err := rdr.ReadBytes('\n')
 		if err != nil {
@@ -143,7 +151,7 @@ func (ib *ImageBuilder) monitorBuild(ctx context.Context, rc io.ReadCloser) erro
 		err = json.Unmarshal(line, &errormsg)
 		if err == nil {
 			// is an error
-			return fmt.Errorf("build error: %v: detail: %v: %v", errormsg.Error, errormsg.ErrorDetail.Code, errormsg.ErrorDetail.Message)
+			return fmt.Errorf("action error: %v: detail: %v: %v", errormsg.Error, errormsg.ErrorDetail.Code, errormsg.ErrorDetail.Message)
 		}
 		err = json.Unmarshal(line, &event)
 		if err != nil {
@@ -151,4 +159,59 @@ func (ib *ImageBuilder) monitorBuild(ctx context.Context, rc io.ReadCloser) erro
 		}
 		log.Printf("%v\n", event.Stream)
 	}
+}
+
+// PushBuildToRegistry pushes the already built image and all associated tags to the
+// configured remote Docker registry. Caller must ensure the image has already
+// been built successfully
+func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildRequest) error {
+	if isCancelled(ctx.Done()) {
+		return fmt.Errorf("push was cancelled: %v", ctx.Err())
+	}
+	repo := req.Push.Registry.Repo
+	if repo == "" {
+		return fmt.Errorf("PushBuildToRegistry called but repo is empty")
+	}
+	rsl := strings.Split(repo, "/")
+	var registry string
+	switch len(rsl) {
+	case 2: // Docker Hub
+		registry = "https://index.docker.io/v2/"
+	case 3: // private registry
+		registry = rsl[0]
+	default:
+		return fmt.Errorf("cannot determine base registry URL from %v", repo)
+	}
+	var auth string
+	if val, ok := dockerConfig.dockercfgContents[registry]; ok {
+		auth = val.Auth
+	} else {
+		return fmt.Errorf("auth not found in dockercfg for %v", registry)
+	}
+	opts := dtypes.ImagePushOptions{
+		All:          true,
+		RegistryAuth: auth,
+	}
+	for _, name := range ib.getFullImageNames(req) {
+		if isCancelled(ctx.Done()) {
+			return fmt.Errorf("push was cancelled: %v", ctx.Err())
+		}
+		ipr, err := ib.c.ImagePush(ctx, name, opts)
+		if err != nil {
+			return fmt.Errorf("error initiating registry push: %v", err)
+		}
+		err = ib.monitorDockerAction(ctx, ipr)
+		if err != nil {
+			return fmt.Errorf("error monitoring registry push action: %v", err)
+		}
+	}
+	return nil
+}
+
+// PushBuildToS3 exports and uploads the already built image to the configured S3 bucket/key
+func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, req *BuildRequest) error {
+	if isCancelled(ctx.Done()) {
+		return fmt.Errorf("push was cancelled: %v", ctx.Err())
+	}
+	return fmt.Errorf("not yet implemented")
 }

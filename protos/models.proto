@@ -8,14 +8,10 @@ service FuranExecutor {
   rpc CancelBuild (BuildCancelRequest) returns (BuildStatusResponse) {}
 }
 
-message GitRefDefinition {
-  string branch = 1;
-  string sha = 2;
-}
 
 message BuildDefinition {
   string github_repo = 1;
-  GitRefDefinition ref = 2;
+  string ref = 2; // sha/branch/tag
   repeated string tags = 3;
   bool tag_with_commit_sha = 4;
 }
@@ -25,8 +21,9 @@ message PushRegistryDefinition {
 }
 
 message PushS3Definition {
-  string bucket = 1;
-  string key_prefix = 2;
+  string region = 1;
+  string bucket = 2;
+  string key_prefix = 3;
 }
 
 message PushDefinition {

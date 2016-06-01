@@ -29,7 +29,29 @@ func listenRPC() {
 
 // gRPC handlers
 func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*BuildRequestResponse, error) {
-	return &BuildRequestResponse{}, nil
+	resp := &BuildRequestResponse{}
+	if req.Push.Registry.Repo == "" {
+		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
+			return resp, fmt.Errorf("push registry and S3 configuration are both empty (at least one is required)")
+		}
+	}
+	builder, err := NewImageBuilder(gitConfig.token)
+	if err != nil {
+		return resp, fmt.Errorf("error creating image builder: %v", err)
+	}
+	err = builder.Build(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	if req.Push.Registry.Repo == "" {
+		err = builder.PushBuildToS3(ctx, req)
+	} else {
+		err = builder.PushBuildToRegistry(ctx, req)
+	}
+	if err != nil {
+		return resp, fmt.Errorf("error pushing: %v", err)
+	}
+	return resp, nil
 }
 
 func (gr *grpcserver) GetBuildStatus(ctx context.Context, req *BuildStatusRequest) (*BuildStatusResponse, error) {

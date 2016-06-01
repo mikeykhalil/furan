@@ -14,13 +14,9 @@ Body:
 {
   "build": {
     "github_repo": "dollarshaveclub/foobar",
-    "tags": ["master"],
+    "tags": ["master"],   // tags only (not including repo/name)
     "tag_with_commit_sha": true,
-    "ref": {
-        "branch": "master",
-        // OR
-        "sha": "xxxxxxxxxxxxx"
-    },
+    "ref": "master",   // commit SHA or branch or tag
   },
   "push": {
     "registry": {
@@ -28,6 +24,7 @@ Body:
     },
     // OR
     "s3": {
+      "region": "us-west-2",
       "bucket": "foobar",
       "key_prefix": "myfolder/"
     }
@@ -54,17 +51,15 @@ Response:
   "request": {
     "build": {
       "github_repo": "dollarshaveclub/foobar",
-      "ref": {
-          "branch": "master",
-      },
+      "tags": ["master"],
+      "tag_with_commit_sha": true,
+      "ref": "master",
     },
     "push": {
       "registry": {
-        "image_repo": "quay.io/dollarshaveclub/foobar",
-        "tags": ["master"],
-        "tag_with_commit_sha": true,
+        "repo": "quay.io/dollarshaveclub/foobar"
       }
-  },
+    },
   "state": "building",
   "failed": false,
   "started": "2016-05-19T07:33:54.691073",
@@ -76,8 +71,6 @@ Response:
 Possible states:
   - building
   - pushing
-  - pullingSquashed
   - success
   - buildFailure
   - pushFailure
-  - pullSquashedFailure

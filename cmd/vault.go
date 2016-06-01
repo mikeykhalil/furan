@@ -1,17 +1,12 @@
 package cmd
 
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 
 	"github.com/dollarshaveclub/go-lib/vaultclient"
-)
-
-const (
-	vaultTLSKeyPath  = "secret/production/furan/tls/key"
-	vaultTLSCertPath = "secret/production/furan/tls/cert"
-	githubTokenPath  = "secret/production/furan/github/token"
 )
 
 func safeStringCast(v interface{}) string {
@@ -43,36 +38,42 @@ func getVaultClient() (*vaultclient.VaultClient, error) {
 	return vc, nil
 }
 
+func vaultPath(path string) string {
+	return fmt.Sprintf("%v%v", vaultConfig.vaultPathPrefix, path)
+}
+
 func setupVault() {
 	vc, err := getVaultClient()
 	if err != nil {
 		log.Fatalf("Error creating Vault client; %v", err)
 	}
-	cert, err := vc.GetValue(vaultTLSCertPath)
-	if err != nil {
-		log.Fatalf("Error getting TLS certificate: %v", err)
-	}
-	key, err := vc.GetValue(vaultTLSKeyPath)
-	if err != nil {
-		log.Fatalf("Error getting TLS key: %v", err)
-	}
-	ght, err := vc.GetValue(githubTokenPath)
+	ght, err := vc.GetValue(vaultPath(gitConfig.tokenVaultPath))
 	if err != nil {
 		log.Fatalf("Error getting GitHub token: %v", err)
 	}
-	serverConfig.tlsCert = []byte(safeStringCast(cert))
-	serverConfig.tlsKey = []byte(safeStringCast(key))
 	gitConfig.token = safeStringCast(ght)
 }
 
 // TLS cert/key are retrieved from Vault and must be written to temp files
 func writeTLSCert() (string, string) {
+	vc, err := getVaultClient()
+	if err != nil {
+		log.Fatalf("Error creating Vault client; %v", err)
+	}
+	cert, err := vc.GetValue(vaultPath(serverConfig.vaultTLSCertPath))
+	if err != nil {
+		log.Fatalf("Error getting TLS certificate: %v", err)
+	}
+	key, err := vc.GetValue(vaultPath(serverConfig.vaultTLSKeyPath))
+	if err != nil {
+		log.Fatalf("Error getting TLS key: %v", err)
+	}
 	cf, err := ioutil.TempFile("", "tls-cert")
 	if err != nil {
 		log.Fatalf("Error creating TLS certificate temp file: %v", err)
 	}
 	defer cf.Close()
-	_, err = cf.Write(serverConfig.tlsCert)
+	_, err = cf.Write([]byte(safeStringCast(cert)))
 	if err != nil {
 		log.Fatalf("Error writing TLS certificate temp file: %v", err)
 	}
@@ -81,7 +82,7 @@ func writeTLSCert() (string, string) {
 		log.Fatalf("Error creating TLS key temp file: %v", err)
 	}
 	defer kf.Close()
-	_, err = kf.Write(serverConfig.tlsKey)
+	_, err = kf.Write([]byte(safeStringCast(key)))
 	if err != nil {
 		log.Fatalf("Error writing TLS key temp file: %v", err)
 	}
