@@ -8,6 +8,10 @@ service FuranExecutor {
   rpc CancelBuild (BuildCancelRequest) returns (BuildStatusResponse) {}
 }
 
+message RPCError {
+  bool is_error = 1;
+  string error_msg = 2;
+}
 
 message BuildDefinition {
   string github_repo = 1;
@@ -31,13 +35,11 @@ message PushDefinition {
   PushS3Definition s3 = 2;
 }
 
+// Requests
+
 message BuildRequest {
   BuildDefinition build = 1;
   PushDefinition push = 2;
-}
-
-message BuildRequestResponse {
-  string build_id = 1;
 }
 
 message BuildStatusRequest {
@@ -48,7 +50,15 @@ message BuildCancelRequest {
   string build_id = 1;
 }
 
+// Responses
+
+message BuildRequestResponse {
+  RPCError error = 1;
+  string build_id = 2;
+}
+
 message BuildStatusResponse {
+  RPCError error = 1;
   enum BuildState {
     BUILDING = 0;
     PUSHING = 1;
@@ -56,13 +66,15 @@ message BuildStatusResponse {
     BUILD_FAILURE = 3;
     PUSH_FAILURE = 4;
   }
-  string build_id = 1;
-  BuildRequest build_request = 2;
-  BuildState state = 3;
-  bool finished = 4;
-  bool failed = 5;
-  bool canceled = 6;
-  string started = 7;
-  string completed = 8;
-  int32 duration = 9;
+  string build_id = 2;
+  BuildRequest build_request = 3;
+  BuildState state = 4;
+  bytes build_output = 5;
+  bytes push_output = 6;
+  bool finished = 7;
+  bool failed = 8;
+  bool cancelled = 9;
+  string started = 10;
+  string completed = 11;
+  int32 duration = 12;
 }

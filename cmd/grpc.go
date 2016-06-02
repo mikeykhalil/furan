@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 
+	"github.com/gocql/gocql"
+
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -27,21 +29,39 @@ func listenRPC() {
 	s.Serve(l)
 }
 
-// gRPC handlers
-func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*BuildRequestResponse, error) {
-	resp := &BuildRequestResponse{}
-	if req.Push.Registry.Repo == "" {
-		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
-			return resp, fmt.Errorf("push registry and S3 configuration are both empty (at least one is required)")
-		}
+func (gr *grpcserver) finishBuild(id gocql.UUID, failed bool) error {
+	flags := map[string]bool{
+		"failed":   failed,
+		"finished": true,
 	}
+	return setBuildFlags(dbConfig.session, id, flags)
+}
+
+// Performs build synchronously
+func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql.UUID) {
 	builder, err := NewImageBuilder(gitConfig.token)
 	if err != nil {
-		return resp, fmt.Errorf("error creating image builder: %v", err)
+		gr.finishBuild(id, true)
+		log.Printf("%v: error creating image builder: %v", id.String(), err)
+		return
 	}
-	err = builder.Build(ctx, req)
+	err = setBuildState(dbConfig.session, id, BuildStatusResponse_BUILDING)
 	if err != nil {
-		return resp, err
+		gr.finishBuild(id, true)
+		log.Printf("error setting build state to building: %v", err)
+		return
+	}
+	err = builder.Build(ctx, req, id)
+	if err != nil {
+		setBuildState(dbConfig.session, id, BuildStatusResponse_BUILD_FAILURE)
+		gr.finishBuild(id, true)
+		return
+	}
+	err = setBuildState(dbConfig.session, id, BuildStatusResponse_PUSHING)
+	if err != nil {
+		gr.finishBuild(id, true)
+		log.Printf("error setting build state to pushing: %v", err)
+		return
 	}
 	if req.Push.Registry.Repo == "" {
 		err = builder.PushBuildToS3(ctx, req)
@@ -49,8 +69,41 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 		err = builder.PushBuildToRegistry(ctx, req)
 	}
 	if err != nil {
-		return resp, fmt.Errorf("error pushing: %v", err)
+		gr.finishBuild(id, true)
+		setBuildState(dbConfig.session, id, BuildStatusResponse_PUSH_FAILURE)
+		log.Printf("error pushing: %v", err)
+		return
 	}
+	err = setBuildState(dbConfig.session, id, BuildStatusResponse_SUCCESS)
+	if err != nil {
+		gr.finishBuild(id, true)
+		log.Printf("error setting build state to success: %v", err)
+		return
+	}
+	err = gr.finishBuild(id, false)
+	if err != nil {
+		log.Printf("error finalizing build: %v", err)
+	}
+}
+
+// gRPC handlers
+func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*BuildRequestResponse, error) {
+	resp := &BuildRequestResponse{}
+	if req.Push.Registry.Repo == "" {
+		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
+			resp.Error.IsError = true
+			resp.Error.ErrorMsg = "push registry and S3 configuration are both empty (at least one is required)"
+			return resp, nil
+		}
+	}
+	id, err := createBuild(dbConfig.session, req)
+	if err != nil {
+		resp.Error.IsError = true
+		resp.Error.ErrorMsg = fmt.Sprintf("error creating build in DB: %v", err)
+		return resp, nil
+	}
+	go gr.syncBuild(ctx, req, *id)
+	resp.BuildId = id.String()
 	return resp, nil
 }
 
