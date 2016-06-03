@@ -58,6 +58,10 @@ func Execute() {
 }
 
 func init() {
+	home := os.Getenv("HOME")
+	if home != "" {
+		home += "/"
+	}
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.addr, "vault-addr", "a", "https://vault-prod.shave.io:8200", "Vault URL")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.token, "vault-token", "t", os.Getenv("VAULT_TOKEN"), "Vault token (if using token auth)")
 	RootCmd.PersistentFlags().BoolVarP(&vaultConfig.tokenAuth, "vault-token-auth", "k", false, "Use Vault token-based auth")
@@ -69,8 +73,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&nodestr, "db-nodes", "n", "", "Comma-delimited list of Cassandra nodes (if not using Consul discovery)")
 	RootCmd.PersistentFlags().StringVarP(&datacenterstr, "db-dc", "d", "us-west-2", "Comma-delimited list of Cassandra datacenters (if not using Consul discovery)")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.vaultPathPrefix, "vault-prefix", "x", "secret/production/furan", "Vault path prefix for secrets")
-	RootCmd.PersistentFlags().StringVarP(&gitConfig.tokenVaultPath, "github-token-path", "g", "github/token", "Vault path (appended to prefix) for GitHub token")
-	RootCmd.PersistentFlags().StringVarP(&dockerConfig.dockercfgPath, "dockercfg-path", "e", ".dockercfg", "Path to .dockercfg (registry push authentication)")
+	RootCmd.PersistentFlags().StringVarP(&gitConfig.tokenVaultPath, "github-token-path", "g", "/github/token", "Vault path (appended to prefix) for GitHub token")
+	RootCmd.PersistentFlags().StringVarP(&dockerConfig.dockercfgPath, "dockercfg-path", "e", fmt.Sprintf("%v.dockercfg", home), "Path to .dockercfg (registry push authentication)")
 }
 
 func isCancelled(done <-chan struct{}) bool {

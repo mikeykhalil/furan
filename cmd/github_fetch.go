@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 
@@ -37,5 +38,10 @@ func (gf *GitHubFetcher) Get(owner string, repo string, dfPath string, ref strin
 	if err != nil {
 		return nil, nil, err
 	}
-	return fc.Content, url, nil
+	df, err := base64.StdEncoding.DecodeString(*fc.Content)
+	if err != nil {
+		return nil, nil, err
+	}
+	dfs := string(df)
+	return &dfs, url, nil
 }

@@ -87,7 +87,7 @@ var requiredUDTs = []cassandra.UDT{
 		Name: "build_request",
 		Columns: []string{
 			"github_repo text",
-			"tags set<text>",
+			"tags list<text>",
 			"tag_with_commit_sha boolean",
 			"ref text",
 			"push_registry_repo text",

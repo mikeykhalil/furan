@@ -8,12 +8,17 @@ import (
 
 func createBuild(s *gocql.Session, req *BuildRequest) (*gocql.UUID, error) {
 	q := `INSERT INTO builds_by_id (id, request, state, finished, failed, cancelled, started)
-        VALUES (?,?,?,?,?,?,?);`
+        VALUES (?,{github_repo: ?, tags: ?, tag_with_commit_sha: ?, ref: ?,
+					push_registry_repo: ?, push_s3_region: ?, push_s3_bucket: ?,
+					push_s3_key_prefix: ?},?,?,?,?,?);`
 	id, err := gocql.RandomUUID()
 	if err != nil {
 		return nil, err
 	}
-	return &id, s.Query(q, id, udtFromBuildRequest(req), "started", false, false, false, time.Now()).Exec()
+	udt := udtFromBuildRequest(req)
+	return &id, s.Query(q, id, udt.GithubRepo, udt.Tags, udt.TagWithCommitSha, udt.Ref,
+		udt.PushRegistryRepo, udt.PushS3Region, udt.PushS3Bucket, udt.PushS3KeyPrefix,
+		"started", false, false, false, time.Now()).Exec()
 }
 
 func getBuildByID(s *gocql.Session, id gocql.UUID) (*BuildStatusResponse, error) {

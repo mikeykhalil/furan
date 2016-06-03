@@ -21,9 +21,10 @@ import (
 
 type actionType int
 
+// Docker action types
 const (
-	Build actionType = iota
-	Push
+	Build actionType = iota // Build is an image build
+	Push                    // Push is a registry push
 )
 
 // RepoBuildData contains data about a GitHub repo necessary to do a Docker build
@@ -187,6 +188,7 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 			}
 			return wtr.Bytes(), fmt.Errorf("error reading event stream: %v", err)
 		}
+		log.Printf("%v: %v", ctx.Value("id").(string), string(line))
 		wtr.Write(line)
 		var errormsg dockerErrorEvent
 		var event dockerStreamEvent

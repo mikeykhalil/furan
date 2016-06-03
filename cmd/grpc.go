@@ -53,6 +53,7 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql
 	}
 	err = builder.Build(ctx, req, id)
 	if err != nil {
+		log.Printf("error performing build: %v", err)
 		setBuildState(dbConfig.session, id, BuildStatusResponse_BUILD_FAILURE)
 		gr.finishBuild(id, true)
 		return
@@ -88,7 +89,9 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql
 
 // gRPC handlers
 func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*BuildRequestResponse, error) {
-	resp := &BuildRequestResponse{}
+	resp := &BuildRequestResponse{
+		Error: &RPCError{},
+	}
 	if req.Push.Registry.Repo == "" {
 		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
 			resp.Error.IsError = true
