@@ -6,9 +6,14 @@
 apk update
 apk add git
 
-git log -1 --pretty="format:%h" > VERSION.txt
-git log -1 --pretty="format:%ai %s" > DESCRIPTION.txt
-rm -rf ./.git
+if [[ -d ".git" ]]; then
+  git log -1 --pretty="format:%h" > VERSION.txt
+  git log -1 --pretty="format:%ai %s" > DESCRIPTION.txt
+  rm -rf ./.git
+else
+  echo "unknown" > VERSION.txt
+  echo "unknown" > DESCRIPTION.txt
+fi
 
 go get -v
 go build
