@@ -58,11 +58,11 @@ func setBuildState(s *gocql.Session, id gocql.UUID, state BuildStatusResponse_Bu
 }
 
 func setBuildImageBuildOutput(s *gocql.Session, id gocql.UUID, output []byte) error {
-	q := `UPDATE build_by_id SET build_output = ? WHERE id = ?;`
+	q := `UPDATE builds_by_id SET build_output = ? WHERE id = ?;`
 	return s.Query(q, string(output), id).Exec()
 }
 
 func setBuildPushOutput(s *gocql.Session, id gocql.UUID, output []byte) error {
-	q := `UPDATE build_by_id SET push_output = ? WHERE id = ?;`
+	q := `UPDATE builds_by_id SET push_output = ? WHERE id = ?;`
 	return s.Query(q, string(output), id).Exec()
 }

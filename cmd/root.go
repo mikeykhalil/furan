@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	dtypes "github.com/docker/engine-api/types"
 	"github.com/spf13/cobra"
 )
 
@@ -24,15 +27,9 @@ type gitconfig struct {
 	token          string // GitHub token
 }
 
-// struct to deserialize dockercfg into
-type dockerAuth struct {
-	Auth  string `json:"auth"`
-	Email string `json:"email"`
-}
-
 type dockerconfig struct {
 	dockercfgPath     string
-	dockercfgContents map[string]dockerAuth
+	dockercfgContents map[string]dtypes.AuthConfig
 }
 
 var vaultConfig vaultconfig
@@ -93,5 +90,27 @@ func readDockercfg() error {
 	}
 	defer f.Close()
 	d := json.NewDecoder(f)
-	return d.Decode(&dockerConfig.dockercfgContents)
+	err = d.Decode(&dockerConfig.dockercfgContents)
+	if err != nil {
+		return err
+	}
+	for k, v := range dockerConfig.dockercfgContents {
+		if v.Auth != "" && v.Username == "" && v.Password == "" {
+			// Auth is a base64-encoded string of the form USERNAME:PASSWORD
+			ab, err := base64.StdEncoding.DecodeString(v.Auth)
+			if err != nil {
+				return fmt.Errorf("dockercfg: couldn't decode auth string: %v: %v", k, err)
+			}
+			as := strings.Split(string(ab), ":")
+			if len(as) != 2 {
+				return fmt.Errorf("dockercfg: malformed auth string: %v: %v: %v", k, v.Auth, string(ab))
+			}
+			v.Username = as[0]
+			v.Password = as[1]
+			v.Auth = ""
+		}
+		v.ServerAddress = k
+		dockerConfig.dockercfgContents[k] = v
+	}
+	return nil
 }

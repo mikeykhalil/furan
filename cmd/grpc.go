@@ -39,6 +39,7 @@ func (gr *grpcserver) finishBuild(id gocql.UUID, failed bool) error {
 
 // Performs build synchronously
 func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql.UUID) {
+	ctx = context.WithValue(ctx, "id", id.String())
 	builder, err := NewImageBuilder(gitConfig.token)
 	if err != nil {
 		gr.finishBuild(id, true)

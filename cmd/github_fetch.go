@@ -1,9 +1,17 @@
 package cmd
 
 import (
-	"encoding/base64"
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
 	"net/url"
+	"path"
+	"strings"
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
@@ -24,24 +32,94 @@ func NewGitHubFetcher(token string) *GitHubFetcher {
 	return gf
 }
 
-// Get fetches Dockerfile contents and gets an archive link for the repo
-func (gf *GitHubFetcher) Get(owner string, repo string, dfPath string, ref string) (dockerfile *string, archiveLink *url.URL, err error) {
-	path := fmt.Sprintf("%v/Dockerfile", dfPath)
+// Get fetches contents of GitHub repo and returns the processed contents as
+// an in-memory io.Reader.
+func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.Reader, err error) {
 	opt := &github.RepositoryContentGetOptions{
 		Ref: ref,
 	}
-	fc, _, _, err := gf.c.Repositories.GetContents(owner, repo, path, opt)
-	if err != nil {
-		return nil, nil, err
-	}
 	url, _, err := gf.c.Repositories.GetArchiveLink(owner, repo, github.Tarball, opt)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	df, err := base64.StdEncoding.DecodeString(*fc.Content)
+	return gf.getArchive(url)
+}
+
+func (gf *GitHubFetcher) getArchive(archiveURL *url.URL) (io.Reader, error) {
+	hc := http.Client{}
+	hr, err := http.NewRequest("GET", archiveURL.String(), nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("error creating http request: %v", err)
 	}
-	dfs := string(df)
-	return &dfs, url, nil
+	resp, err := hc.Do(hr)
+	if err != nil {
+		return nil, fmt.Errorf("error performing archive http request: %v", err)
+	}
+	if resp.StatusCode > 299 {
+		return nil, fmt.Errorf("archive http request failed: %v", resp.StatusCode)
+	}
+	return gf.stripTarPrefix(resp.Body)
+}
+
+func (gf *GitHubFetcher) debugWriteTar(contents []byte) {
+	f, err := ioutil.TempFile("", "output-tar")
+	defer f.Close()
+	log.Printf("debug: saving tar output to %v", f.Name())
+	_, err = f.Write(contents)
+	if err != nil {
+		log.Printf("debug: error writing tar output: %v", err)
+	}
+}
+
+// Files within GitHub archives are prefixed with a random path, so we have to
+// strip that prefix to get an archive suitable for a Docker build context.
+// Note that we do not compress the output tar archive since we assume callers
+// will be passing it to the Docker engine running on localhost
+func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.Reader, error) {
+	defer input.Close()
+	gzr, err := gzip.NewReader(input)
+	if err != nil {
+		return nil, fmt.Errorf("error creating gzip reader: %v", err)
+	}
+	defer gzr.Close()
+	output := bytes.NewBuffer(nil)
+	intar := tar.NewReader(gzr)
+	outtar := tar.NewWriter(output)
+	defer outtar.Close()
+	var contents []byte
+	for {
+		h, err := intar.Next()
+		if err != nil {
+			if err == io.EOF {
+				return output, nil
+			}
+			return nil, fmt.Errorf("error reading input tar entry: %v", err)
+		}
+		if h.Name == "pax_global_header" { // metadata file, ignore
+			continue
+		}
+		if path.IsAbs(h.Name) {
+			return nil, fmt.Errorf("archive contains absolute path: %v", h.Name)
+		}
+		spath := strings.Split(h.Name, "/")
+		if len(spath) == 2 && spath[1] == "" { // top-level directory entry
+			continue
+		}
+		h.Name = strings.Join(spath[1:len(spath)], "/")
+		err = outtar.WriteHeader(h)
+		if err != nil {
+			return nil, fmt.Errorf("error writing output tar header: %v", err)
+		}
+		contents, err = ioutil.ReadAll(intar)
+		if err != nil {
+			return nil, fmt.Errorf("error reading input tar contents: %v", err)
+		}
+		if int64(len(contents)) != h.Size {
+			log.Printf("%v: size mismatch: read %v (size: %v)", h.Name, len(contents), h.Size)
+		}
+		_, err = outtar.Write(contents)
+		if err != nil {
+			return nil, fmt.Errorf("error writing output tar contents: %v", err)
+		}
+	}
 }

@@ -3,13 +3,12 @@ package cmd
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-	"net/url"
+	"regexp"
 	"strings"
 
 	"golang.org/x/net/context"
@@ -29,9 +28,9 @@ const (
 
 // RepoBuildData contains data about a GitHub repo necessary to do a Docker build
 type RepoBuildData struct {
-	DockerfileContents *string
-	ArchiveLink        *url.URL
-	Tags               []string //{name}:{tag}
+	DockerfilePath string
+	Context        io.Reader
+	Tags           []string //{name}:{tag}
 }
 
 // ImageBuilder is an object that builds and pushes images
@@ -78,15 +77,14 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
-	ctx = context.WithValue(ctx, "id", id)
-	dockerfile, archiveLink, err := ib.gf.Get(owner, repo, ".", req.Build.Ref)
+	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
 	if err != nil {
 		return err
 	}
 	rbi := &RepoBuildData{
-		DockerfileContents: dockerfile,
-		ArchiveLink:        archiveLink,
-		Tags:               ib.getFullImageNames(req),
+		DockerfilePath: "./Dockerfile",
+		Context:        contents,
+		Tags:           ib.getFullImageNames(req),
 	}
 	return ib.dobuild(ctx, req, rbi)
 }
@@ -97,12 +95,16 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, outpu
 	}
 	val := ctx.Value("id")
 	switch val.(type) {
-	case gocql.UUID:
+	case string:
 		break
 	default:
 		return fmt.Errorf("id missing or bad type: %T", val)
 	}
-	id := val.(gocql.UUID)
+	idstring := val.(string)
+	id, err := gocql.ParseUUID(idstring)
+	if err != nil {
+		return fmt.Errorf("malformed id: %v", err)
+	}
 	switch action {
 	case Build:
 		return setBuildImageBuildOutput(dbConfig.session, id, output)
@@ -118,32 +120,14 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
-	hc := http.Client{}
-	hr, err := http.NewRequest("GET", rbi.ArchiveLink.String(), nil)
-	if err != nil {
-		return fmt.Errorf("error creating http request: %v", err)
-	}
-	resp, err := hc.Do(hr)
-	if err != nil {
-		return fmt.Errorf("error performing archive http request: %v", err)
-	}
-	if resp.StatusCode > 299 {
-		return fmt.Errorf("archive http request failed: %v", resp.StatusCode)
-	}
-	defer resp.Body.Close()
-	gzr, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return fmt.Errorf("error creating gzip reader: %v", err)
-	}
-	defer gzr.Close()
 	opts := dtypes.ImageBuildOptions{
 		Tags:        rbi.Tags,
 		Remove:      true,
 		ForceRemove: true,
 		PullParent:  true,
-		Dockerfile:  *rbi.DockerfileContents,
+		Dockerfile:  rbi.DockerfilePath,
 	}
-	ibr, err := ib.c.ImageBuild(ctx, gzr, opts)
+	ibr, err := ib.c.ImageBuild(ctx, rbi.Context, opts)
 	if err != nil {
 		return fmt.Errorf("error starting build: %v", err)
 	}
@@ -173,6 +157,9 @@ type dockerErrorEvent struct {
 	ErrorDetail dockerErrorDetail `json:"errorDetail"`
 }
 
+// distinguish between an error message and a stream message
+var errorPattern = regexp.MustCompile(`"error":`)
+
 // monitorDockerAction reads the Docker API response stream and detects any errors
 func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser) ([]byte, error) {
 	rdr := bufio.NewReader(rc)
@@ -190,18 +177,20 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 		}
 		log.Printf("%v: %v", ctx.Value("id").(string), string(line))
 		wtr.Write(line)
-		var errormsg dockerErrorEvent
-		var event dockerStreamEvent
-		err = json.Unmarshal(line, &errormsg)
-		if err == nil {
-			// is an error
+		if errorPattern.Match(line) {
+			var errormsg dockerErrorEvent
+			err = json.Unmarshal(line, &errormsg)
+			if err != nil {
+				return wtr.Bytes(), fmt.Errorf("error unmarshaling error message: %v: %v", string(line), err)
+			}
+			//continue
 			return wtr.Bytes(), fmt.Errorf("action error: %v: detail: %v: %v", errormsg.Error, errormsg.ErrorDetail.Code, errormsg.ErrorDetail.Message)
 		}
+		var event dockerStreamEvent
 		err = json.Unmarshal(line, &event)
 		if err != nil {
 			return wtr.Bytes(), fmt.Errorf("error unmarshaling event: %v (event: %v)", err, string(line))
 		}
-		log.Printf("%v\n", event.Stream)
 	}
 }
 
@@ -228,7 +217,11 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	}
 	var auth string
 	if val, ok := dockerConfig.dockercfgContents[registry]; ok {
-		auth = val.Auth
+		j, err := json.Marshal(&val)
+		if err != nil {
+			return fmt.Errorf("error marshaling auth: %v", err)
+		}
+		auth = base64.StdEncoding.EncodeToString(j)
 	} else {
 		return fmt.Errorf("auth not found in dockercfg for %v", registry)
 	}
