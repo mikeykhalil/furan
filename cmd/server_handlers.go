@@ -126,6 +126,14 @@ func httpError(w http.ResponseWriter, code int, err error) {
 	w.Write([]byte(fmt.Sprintf(`{"error_details":"%v"}`, err)))
 }
 
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	if cap(workerChan) > 0 {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}
+}
+
 func versionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	version := struct {

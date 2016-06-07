@@ -66,6 +66,7 @@ func server(cmd *cobra.Command, args []string) {
 	r.HandleFunc("/build", buildRequestHandler).Methods("POST")
 	r.HandleFunc("/build/{id}", buildStatusHandler).Methods("GET")
 	r.HandleFunc("/build/{id}", buildCancelHandler).Methods("DELETE")
+	r.HandleFunc("/health", healthHandler).Methods("GET")
 
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	addr := fmt.Sprintf("%v:%v", serverConfig.httpsAddr, serverConfig.httpsPort)

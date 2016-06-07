@@ -76,3 +76,14 @@ Possible states:
   - success
   - buildFailure
   - pushFailure
+
+
+GET ``/health``
+---------------
+
+Healthcheck.
+
+Response:
+
+- 200 OK: everything is fine
+- 429 Too Many Requests: queue is full
