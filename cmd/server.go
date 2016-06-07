@@ -11,16 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	workerBufferSize = 1000 // buffered pending build requests
-)
-
 type serverconfig struct {
 	httpsPort        uint
 	grpcPort         uint
 	httpsAddr        string
 	grpcAddr         string
 	concurrency      uint
+	queuesize        uint
 	vaultTLSCertPath string
 	vaultTLSKeyPath  string
 	tlsCert          []byte
@@ -45,6 +42,7 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverConfig.httpsAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.grpcAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.concurrency, "concurrency", 10, "Max concurrent builds")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.queuesize, "queue", 100, "Max queue size for buffered build requests")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSCertPath, "tls-cert-path", "/tls/cert", "Vault path to TLS certificate")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
 	RootCmd.AddCommand(serverCmd)
@@ -60,6 +58,7 @@ func server(cmd *cobra.Command, args []string) {
 		log.Fatalf("error reading dockercfg: %v", err)
 	}
 
+	runWorkers()
 	go listenRPC()
 
 	r := mux.NewRouter()
@@ -101,9 +100,9 @@ func setupVersion() {
 }
 
 func runWorkers() {
-	workerChan = make(chan *BuildRequest, workerBufferSize)
-	log.Printf("running %v workers (buffer: %v)", serverConfig.concurrency, workerBufferSize)
+	workerChan = make(chan *workerRequest, serverConfig.queuesize)
 	for i := 0; uint(i) < serverConfig.concurrency; i++ {
 		go buildWorker()
 	}
+	log.Printf("%v workers running (queue: %v)", serverConfig.concurrency, serverConfig.queuesize)
 }

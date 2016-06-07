@@ -80,3 +80,9 @@ func setBuildPushOutput(s *gocql.Session, id gocql.UUID, output []byte) error {
 	q := `UPDATE builds_by_id SET push_output = ? WHERE id = ?;`
 	return s.Query(q, string(output), id).Exec()
 }
+
+// Only used in case of queue full when we can't actually do a build
+func deleteBuild(s *gocql.Session, id gocql.UUID) error {
+	q := `DELETE FROM builds_by_id WHERE id = ?;`
+	return s.Query(q, id).Exec()
+}

@@ -15,8 +15,10 @@ else
   echo "unknown" > DESCRIPTION.txt
 fi
 
+./build_protos.sh
+
 go get -v
-go build
+go build || exit 1
 go install
 
 apk del git

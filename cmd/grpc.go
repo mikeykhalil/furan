@@ -15,6 +15,23 @@ type grpcserver struct {
 }
 
 var grpcServer grpcserver
+var workerChan chan *workerRequest
+
+type workerRequest struct {
+	ctx context.Context
+	req *BuildRequest
+	id  gocql.UUID
+}
+
+func buildWorker() {
+	var wreq *workerRequest
+	for {
+		wreq = <-workerChan
+		if !isCancelled(wreq.ctx.Done()) {
+			grpcServer.syncBuild(wreq.ctx, wreq.req, wreq.id)
+		}
+	}
+}
 
 func listenRPC() {
 	addr := fmt.Sprintf("%v:%v", serverConfig.grpcAddr, serverConfig.grpcPort)
@@ -118,9 +135,24 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 		resp.Error.ErrorMsg = fmt.Sprintf("error creating build in DB: %v", err)
 		return resp, nil
 	}
-	go gr.syncBuild(ctx, req, *id)
-	resp.BuildId = id.String()
-	return resp, nil
+	wreq := workerRequest{
+		ctx: ctx,
+		req: req,
+		id:  *id,
+	}
+	select {
+	case workerChan <- &wreq:
+		resp.BuildId = id.String()
+		return resp, nil
+	default:
+		err = deleteBuild(dbConfig.session, *id)
+		if err != nil {
+			log.Printf("error deleting build from DB: %v", err)
+		}
+		resp.Error.IsError = true
+		resp.Error.ErrorMsg = "build queue is full; try again later"
+		return resp, nil
+	}
 }
 
 func (gr *grpcserver) GetBuildStatus(ctx context.Context, req *BuildStatusRequest) (*BuildStatusResponse, error) {
