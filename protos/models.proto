@@ -15,9 +15,10 @@ message RPCError {
 
 message BuildDefinition {
   string github_repo = 1;
-  string ref = 2; // sha/branch/tag
-  repeated string tags = 3;
-  bool tag_with_commit_sha = 4;
+  string dockerfile_path = 2;
+  string ref = 3; // sha/branch/tag
+  repeated string tags = 4;
+  bool tag_with_commit_sha = 5;
 }
 
 message PushRegistryDefinition {

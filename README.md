@@ -14,6 +14,7 @@ Body:
 {
   "build": {
     "github_repo": "dollarshaveclub/foobar",
+    "dockerfile_path": "Dockerfile"  // optional: defaults to 'Dockerfile'
     "tags": ["master"],   // tags only (not including repo/name)
     "tag_with_commit_sha": true,
     "ref": "master",   // commit SHA or branch or tag
@@ -36,7 +37,8 @@ Response:
 
 ```json
 {
-  "build_id": "56aeda1c-6736-4657-8440-77972b103fee"
+  "buildId": "56aeda1c-6736-4657-8440-77972b103fee",
+  "error": {}
 }
 ```
 

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -8,7 +9,7 @@ import (
 
 func createBuild(s *gocql.Session, req *BuildRequest) (*gocql.UUID, error) {
 	q := `INSERT INTO builds_by_id (id, request, state, finished, failed, cancelled, started)
-        VALUES (?,{github_repo: ?, tags: ?, tag_with_commit_sha: ?, ref: ?,
+        VALUES (?,{github_repo: ?, dockerfile_path: ?, tags: ?, tag_with_commit_sha: ?, ref: ?,
 					push_registry_repo: ?, push_s3_region: ?, push_s3_bucket: ?,
 					push_s3_key_prefix: ?},?,?,?,?,?);`
 	id, err := gocql.RandomUUID()
@@ -16,7 +17,7 @@ func createBuild(s *gocql.Session, req *BuildRequest) (*gocql.UUID, error) {
 		return nil, err
 	}
 	udt := udtFromBuildRequest(req)
-	return &id, s.Query(q, id, udt.GithubRepo, udt.Tags, udt.TagWithCommitSha, udt.Ref,
+	return &id, s.Query(q, id, udt.GithubRepo, udt.DockerfilePath, udt.Tags, udt.TagWithCommitSha, udt.Ref,
 		udt.PushRegistryRepo, udt.PushS3Region, udt.PushS3Bucket, udt.PushS3KeyPrefix,
 		"started", false, false, false, time.Now()).Exec()
 }
@@ -42,14 +43,27 @@ func getBuildByID(s *gocql.Session, id gocql.UUID) (*BuildStatusResponse, error)
 
 func setBuildFlags(s *gocql.Session, id gocql.UUID, flags map[string]bool) error {
 	var err error
-	q := `UPDATE builds_by_id SET ? = ? WHERE id = ?;`
+	q := `UPDATE builds_by_id SET %v = ? WHERE id = ?;`
 	for k, v := range flags {
-		err = s.Query(q, k, v, id).Exec()
+		err = s.Query(fmt.Sprintf(q, k), v, id).Exec()
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func setBuildCompletedTimestamp(s *gocql.Session, id gocql.UUID) error {
+	var started time.Time
+	now := time.Now()
+	q := `SELECT started FROM builds_by_id WHERE id = ?;`
+	err := s.Query(q, id).Scan(&started)
+	if err != nil {
+		return err
+	}
+	duration := now.Sub(started).Seconds()
+	q = `UPDATE builds_by_id SET completed = ?, duration = ? WHERE id = ?;`
+	return s.Query(q, now, duration, id).Exec()
 }
 
 func setBuildState(s *gocql.Session, id gocql.UUID, state BuildStatusResponse_BuildState) error {

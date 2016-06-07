@@ -30,6 +30,7 @@ var dbConfig dbconfig
 // (protobuf definitions can't have custom tags)
 type buildRequestUDT struct {
 	GithubRepo       string   `cql:"github_repo"`
+	DockerfilePath   string   `cql:"dockerfile_path"`
 	Tags             []string `cql:"tags"`
 	TagWithCommitSha bool     `cql:"tag_with_commit_sha"`
 	Ref              string   `cql:"ref"`
@@ -43,6 +44,7 @@ type buildRequestUDT struct {
 func udtFromBuildRequest(req *BuildRequest) *buildRequestUDT {
 	return &buildRequestUDT{
 		GithubRepo:       req.Build.GithubRepo,
+		DockerfilePath:   req.Build.DockerfilePath,
 		Tags:             req.Build.Tags,
 		TagWithCommitSha: req.Build.TagWithCommitSha,
 		Ref:              req.Build.Ref,
@@ -63,6 +65,7 @@ func buildRequestFromUDT(udt *buildRequestUDT) *BuildRequest {
 		},
 	}
 	br.Build.GithubRepo = udt.GithubRepo
+	br.Build.DockerfilePath = udt.DockerfilePath
 	br.Build.Tags = udt.Tags
 	br.Build.TagWithCommitSha = udt.TagWithCommitSha
 	br.Build.Ref = udt.Ref
@@ -87,6 +90,7 @@ var requiredUDTs = []cassandra.UDT{
 		Name: "build_request",
 		Columns: []string{
 			"github_repo text",
+			"dockerfile_path text",
 			"tags list<text>",
 			"tag_with_commit_sha boolean",
 			"ref text",
@@ -111,7 +115,7 @@ var requiredTables = []cassandra.CTable{
 			"cancelled boolean",
 			"started timestamp",
 			"completed timestamp",
-			"duration int",
+			"duration double",
 		},
 	},
 }

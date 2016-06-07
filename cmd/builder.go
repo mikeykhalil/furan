@@ -81,8 +81,14 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	if err != nil {
 		return err
 	}
+	var dp string
+	if req.Build.DockerfilePath == "" {
+		dp = "Dockerfile"
+	} else {
+		dp = req.Build.DockerfilePath
+	}
 	rbi := &RepoBuildData{
-		DockerfilePath: "./Dockerfile",
+		DockerfilePath: dp,
 		Context:        contents,
 		Tags:           ib.getFullImageNames(req),
 	}

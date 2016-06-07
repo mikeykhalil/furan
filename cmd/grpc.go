@@ -86,6 +86,10 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql
 	if err != nil {
 		log.Printf("error finalizing build: %v", err)
 	}
+	err = setBuildCompletedTimestamp(dbConfig.session, id)
+	if err != nil {
+		log.Printf("error setting build completed timestamp: %v", err)
+	}
 }
 
 // gRPC handlers
