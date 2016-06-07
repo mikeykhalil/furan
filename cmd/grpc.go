@@ -52,7 +52,7 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql
 		log.Printf("error setting build state to building: %v", err)
 		return
 	}
-	err = builder.Build(ctx, req, id)
+	imageid, err := builder.Build(ctx, req, id)
 	if err != nil {
 		log.Printf("error performing build: %v", err)
 		setBuildState(dbConfig.session, id, BuildStatusResponse_BUILD_FAILURE)
@@ -76,6 +76,13 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql
 		log.Printf("error pushing: %v", err)
 		return
 	}
+	err = builder.CleanImage(ctx, imageid)
+	if err != nil {
+		gr.finishBuild(id, true)
+		setBuildState(dbConfig.session, id, BuildStatusResponse_PUSH_FAILURE)
+		log.Printf("error cleaning built image: %v", err)
+		return
+	}
 	err = setBuildState(dbConfig.session, id, BuildStatusResponse_SUCCESS)
 	if err != nil {
 		gr.finishBuild(id, true)
@@ -90,6 +97,7 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql
 	if err != nil {
 		log.Printf("error setting build completed timestamp: %v", err)
 	}
+	log.Printf("build success for %v", id.String())
 }
 
 // gRPC handlers

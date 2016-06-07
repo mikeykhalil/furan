@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"regexp"
 	"strings"
 
 	"golang.org/x/net/context"
@@ -67,19 +65,21 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 }
 
 // Build builds an image accourding to the request
-func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) error {
+func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) (string, error) {
+	log.Printf("starting build %v", id.String())
 	rl := strings.Split(req.Build.GithubRepo, "/")
 	if len(rl) != 2 {
-		return fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
+		return "", fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
 	}
 	owner := rl[0]
 	repo := rl[1]
 	if isCancelled(ctx.Done()) {
-		return fmt.Errorf("build was cancelled: %v", ctx.Err())
+		return "", fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
+	log.Printf("%v: fetching github repo: %v", id.String(), req.Build.GithubRepo)
 	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var dp string
 	if req.Build.DockerfilePath == "" {
@@ -95,18 +95,20 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	return ib.dobuild(ctx, req, rbi)
 }
 
-func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, output []byte) error {
+func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, events []dockerStreamEvent) error {
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
-	val := ctx.Value("id")
-	switch val.(type) {
-	case string:
-		break
-	default:
-		return fmt.Errorf("id missing or bad type: %T", val)
+	output := []byte{}
+	for _, e := range events {
+		j, err := json.Marshal(&e)
+		if err != nil {
+			return fmt.Errorf("error marshaling dockerStreamEvent: %v", err)
+		}
+		j = append(j, byte('\n'))
+		output = append(output, j...)
 	}
-	idstring := val.(string)
+	idstring := ctx.Value("id").(string)
 	id, err := gocql.ParseUUID(idstring)
 	if err != nil {
 		return fmt.Errorf("malformed id: %v", err)
@@ -121,10 +123,15 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, outpu
 	}
 }
 
+const (
+	buildSuccessEventPrefix = "Successfully built "
+)
+
 // doBuild executes the archive file GET and triggers the Docker build
-func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *RepoBuildData) error {
+func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *RepoBuildData) (string, error) {
+	var imageid string
 	if isCancelled(ctx.Done()) {
-		return fmt.Errorf("build was cancelled: %v", ctx.Err())
+		return imageid, fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
 	opts := dtypes.ImageBuildOptions{
 		Tags:        rbi.Tags,
@@ -135,22 +142,39 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	}
 	ibr, err := ib.c.ImageBuild(ctx, rbi.Context, opts)
 	if err != nil {
-		return fmt.Errorf("error starting build: %v", err)
+		return imageid, fmt.Errorf("error starting build: %v", err)
 	}
 	output, err := ib.monitorDockerAction(ctx, ibr.Body)
 	err2 := ib.saveOutput(ctx, Build, output) // we want to save output even if error
 	if err != nil {
-		return err
+		return imageid, err
 	}
 	if err2 != nil {
-		return err2
+		return imageid, err2
 	}
-	return nil
+	// Parse final stream event to find image ID
+	fe := output[len(output)-1]
+	if strings.HasPrefix(fe.Stream, buildSuccessEventPrefix) {
+		imageid = strings.TrimRight(fe.Stream[len(buildSuccessEventPrefix):len(fe.Stream)], "\n")
+	} else {
+		return imageid, fmt.Errorf("could not determine image id from final event: %v", fe.Stream)
+	}
+	log.Printf("built image ID %v", imageid)
+	return imageid, nil
 }
 
 // Models for the JSON objects the Docker API returns
+// This is a combination of all fields we may be interested in
+// Each Docker API endpoint returns a different response schema :-\
 type dockerStreamEvent struct {
-	Stream string `json:"stream"`
+	Stream         string                 `json:"stream"`
+	Status         string                 `json:"status"`
+	ProgressDetail map[string]interface{} `json:"progressDetail"`
+	Progress       string                 `json:"progress"`
+	ID             string                 `json:"id"`
+	Aux            map[string]interface{} `json:"aux"`
+	Error          string                 `json:"error"`
+	ErrorDetail    dockerErrorDetail      `json:"errorDetail"`
 }
 
 type dockerErrorDetail struct {
@@ -158,46 +182,46 @@ type dockerErrorDetail struct {
 	Message string `json:"message"`
 }
 
-type dockerErrorEvent struct {
-	Error       string            `json:"error"`
-	ErrorDetail dockerErrorDetail `json:"errorDetail"`
-}
-
-// distinguish between an error message and a stream message
-var errorPattern = regexp.MustCompile(`"error":`)
-
 // monitorDockerAction reads the Docker API response stream and detects any errors
-func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser) ([]byte, error) {
+func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser) ([]dockerStreamEvent, error) {
 	rdr := bufio.NewReader(rc)
-	wtr := bytes.NewBuffer(nil)
+	output := []dockerStreamEvent{}
 	for {
 		if isCancelled(ctx.Done()) {
-			return wtr.Bytes(), fmt.Errorf("action was cancelled: %v", ctx.Err())
+			return output, fmt.Errorf("action was cancelled: %v", ctx.Err())
 		}
 		line, err := rdr.ReadBytes('\n')
 		if err != nil {
 			if err == io.EOF {
-				return wtr.Bytes(), nil
+				return output, nil
 			}
-			return wtr.Bytes(), fmt.Errorf("error reading event stream: %v", err)
+			return output, fmt.Errorf("error reading event stream: %v", err)
 		}
 		log.Printf("%v: %v", ctx.Value("id").(string), string(line))
-		wtr.Write(line)
-		if errorPattern.Match(line) {
-			var errormsg dockerErrorEvent
-			err = json.Unmarshal(line, &errormsg)
-			if err != nil {
-				return wtr.Bytes(), fmt.Errorf("error unmarshaling error message: %v: %v", string(line), err)
-			}
-			//continue
-			return wtr.Bytes(), fmt.Errorf("action error: %v: detail: %v: %v", errormsg.Error, errormsg.ErrorDetail.Code, errormsg.ErrorDetail.Message)
-		}
 		var event dockerStreamEvent
 		err = json.Unmarshal(line, &event)
 		if err != nil {
-			return wtr.Bytes(), fmt.Errorf("error unmarshaling event: %v (event: %v)", err, string(line))
+			return output, fmt.Errorf("error unmarshaling event: %v (event: %v)", err, string(line))
 		}
+		output = append(output, event)
 	}
+}
+
+// CleanImage cleans up the built image after it's been pushed
+func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
+	if isCancelled(ctx.Done()) {
+		return fmt.Errorf("clean was cancelled: %v", ctx.Err())
+	}
+	log.Printf("Cleaning up images for %v", ctx.Value("id").(string))
+	opts := dtypes.ImageRemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	}
+	resp, err := ib.c.ImageRemove(ctx, imageid, opts)
+	for _, r := range resp {
+		log.Printf("ImageDelete: %v", r)
+	}
+	return err
 }
 
 // PushBuildToRegistry pushes the already built image and all associated tags to the
@@ -207,6 +231,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
+	log.Printf("doing push for %v", ctx.Value("id").(string))
 	repo := req.Push.Registry.Repo
 	if repo == "" {
 		return fmt.Errorf("PushBuildToRegistry called but repo is empty")
@@ -235,7 +260,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		All:          true,
 		RegistryAuth: auth,
 	}
-	var output []byte
+	var output []dockerStreamEvent
 	defer ib.saveOutput(ctx, Push, output) // we want to save output even if error
 	for _, name := range ib.getFullImageNames(req) {
 		if isCancelled(ctx.Done()) {
