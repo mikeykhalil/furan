@@ -139,6 +139,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		ForceRemove: true,
 		PullParent:  true,
 		Dockerfile:  rbi.DockerfilePath,
+		AuthConfigs: dockerConfig.dockercfgContents,
 	}
 	ibr, err := ib.c.ImageBuild(ctx, rbi.Context, opts)
 	if err != nil {
@@ -167,14 +168,14 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 // This is a combination of all fields we may be interested in
 // Each Docker API endpoint returns a different response schema :-\
 type dockerStreamEvent struct {
-	Stream         string                 `json:"stream"`
-	Status         string                 `json:"status"`
-	ProgressDetail map[string]interface{} `json:"progressDetail"`
-	Progress       string                 `json:"progress"`
-	ID             string                 `json:"id"`
-	Aux            map[string]interface{} `json:"aux"`
-	Error          string                 `json:"error"`
-	ErrorDetail    dockerErrorDetail      `json:"errorDetail"`
+	Stream         string                 `json:"stream,omitempty"`
+	Status         string                 `json:"status,omitempty"`
+	ProgressDetail map[string]interface{} `json:"progressDetail,omitempty"`
+	Progress       string                 `json:"progress,omitempty"`
+	ID             string                 `json:"id,omitempty"`
+	Aux            map[string]interface{} `json:"aux,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	ErrorDetail    dockerErrorDetail      `json:"errorDetail,omitempty"`
 }
 
 type dockerErrorDetail struct {
@@ -261,7 +262,6 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		RegistryAuth: auth,
 	}
 	var output []dockerStreamEvent
-	defer ib.saveOutput(ctx, Push, output) // we want to save output even if error
 	for _, name := range ib.getFullImageNames(req) {
 		if isCancelled(ctx.Done()) {
 			return fmt.Errorf("push was cancelled: %v", ctx.Err())
@@ -276,7 +276,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 			return err
 		}
 	}
-	return nil
+	return ib.saveOutput(ctx, Push, output)
 }
 
 // PushBuildToS3 exports and uploads the already built image to the configured S3 bucket/key
