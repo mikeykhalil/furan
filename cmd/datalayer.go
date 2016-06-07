@@ -28,11 +28,17 @@ func getBuildByID(s *gocql.Session, id gocql.UUID) (*BuildStatusResponse, error)
 	var udt buildRequestUDT
 	var state string
 	var started, completed time.Time
-	bi := &BuildStatusResponse{BuildId: id.String()}
-	err := s.Query(q, id).Scan(&udt, &state, &bi.BuildOutput, &bi.PushOutput,
-		&bi.Finished, &bi.Failed, &bi.Cancelled, &started, &completed, &bi.Duration)
+	bi := &BuildStatusResponse{
+		BuildId: id.String(),
+		Error:   &RPCError{},
+	}
+	err := s.Query(q, id).Scan(&udt.GithubRepo, &udt.DockerfilePath, &udt.Tags,
+		&udt.TagWithCommitSha, &udt.Ref, &udt.PushRegistryRepo, &udt.PushS3Region,
+		&udt.PushS3KeyPrefix, &udt.PushS3KeyPrefix, &state, &bi.BuildOutput,
+		&bi.PushOutput, &bi.Finished, &bi.Failed, &bi.Cancelled, &started,
+		&completed, &bi.Duration)
 	if err != nil {
-		return nil, err
+		return bi, err
 	}
 	bi.State = buildStateFromString(state)
 	bi.BuildRequest = buildRequestFromUDT(&udt)

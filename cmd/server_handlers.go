@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
+	"github.com/gorilla/mux"
 	"golang.org/x/net/context"
 )
 
@@ -38,6 +39,16 @@ func unmarshalRequest(r io.Reader) (*BuildRequest, error) {
 	return &req, nil
 }
 
+func handleRPCError(w http.ResponseWriter, rpcerr *RPCError) {
+	switch rpcerr.ErrorType {
+	case RPCError_BAD_REQUEST:
+		badRequestError(w, fmt.Errorf(rpcerr.ErrorMsg))
+	default:
+		internalError(w, fmt.Errorf(rpcerr.ErrorMsg))
+	}
+	return
+}
+
 // REST interface handlers (proxy to gRPC handlers)
 func buildRequestHandler(w http.ResponseWriter, r *http.Request) {
 	req, err := unmarshalRequest(r.Body)
@@ -50,21 +61,29 @@ func buildRequestHandler(w http.ResponseWriter, r *http.Request) {
 		internalError(w, err)
 		return
 	}
+	if resp.Error.IsError {
+		handleRPCError(w, resp.Error)
+		return
+	}
 	httpSuccess(w, resp)
 }
 
 func buildStatusHandler(w http.ResponseWriter, r *http.Request) {
-	var req BuildStatusRequest
-	err := jsonpb.Unmarshal(r.Body, &req)
-	if err != nil {
-		badRequestError(w, err)
-		return
+	id := mux.Vars(r)["id"]
+	req := BuildStatusRequest{
+		BuildId: id,
 	}
 	resp, err := grpcServer.GetBuildStatus(context.TODO(), &req)
 	if err != nil {
 		internalError(w, err)
 		return
 	}
+	if resp.Error.IsError {
+		handleRPCError(w, resp.Error)
+		return
+	}
+	resp.BuildOutput = []byte{}
+	resp.PushOutput = []byte{}
 	httpSuccess(w, resp)
 }
 

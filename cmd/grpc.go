@@ -124,6 +124,7 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 	}
 	if req.Push.Registry.Repo == "" {
 		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
+			resp.Error.ErrorType = RPCError_BAD_REQUEST
 			resp.Error.IsError = true
 			resp.Error.ErrorMsg = "push registry and S3 configuration are both empty (at least one is required)"
 			return resp, nil
@@ -131,6 +132,7 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 	}
 	id, err := createBuild(dbConfig.session, req)
 	if err != nil {
+		resp.Error.ErrorType = RPCError_INTERNAL_ERROR
 		resp.Error.IsError = true
 		resp.Error.ErrorMsg = fmt.Sprintf("error creating build in DB: %v", err)
 		return resp, nil
@@ -150,13 +152,34 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 			log.Printf("error deleting build from DB: %v", err)
 		}
 		resp.Error.IsError = true
+		resp.Error.ErrorType = RPCError_BAD_REQUEST
 		resp.Error.ErrorMsg = "build queue is full; try again later"
 		return resp, nil
 	}
 }
 
 func (gr *grpcserver) GetBuildStatus(ctx context.Context, req *BuildStatusRequest) (*BuildStatusResponse, error) {
-	return &BuildStatusResponse{}, nil
+	resp := &BuildStatusResponse{
+		Error: &RPCError{},
+	}
+	id, err := gocql.ParseUUID(req.BuildId)
+	if err != nil {
+		resp.Error.IsError = true
+		resp.Error.ErrorMsg = fmt.Sprintf("bad id: %v", err)
+		resp.Error.ErrorType = RPCError_BAD_REQUEST
+		return resp, nil
+	}
+	resp, err = getBuildByID(dbConfig.session, id)
+	if err != nil {
+		if err == gocql.ErrNotFound {
+			resp.Error.ErrorType = RPCError_BAD_REQUEST
+		} else {
+			resp.Error.ErrorType = RPCError_INTERNAL_ERROR
+		}
+		resp.Error.IsError = true
+		resp.Error.ErrorMsg = fmt.Sprintf("error getting build: %v", err)
+	}
+	return resp, nil
 }
 
 func (gr *grpcserver) CancelBuild(ctx context.Context, req *BuildCancelRequest) (*BuildStatusResponse, error) {
