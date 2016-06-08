@@ -17,9 +17,14 @@ func createBuild(s *gocql.Session, req *BuildRequest) (*gocql.UUID, error) {
 		return nil, err
 	}
 	udt := udtFromBuildRequest(req)
-	return &id, s.Query(q, id, udt.GithubRepo, udt.DockerfilePath, udt.Tags, udt.TagWithCommitSha, udt.Ref,
+	err = s.Query(q, id, udt.GithubRepo, udt.DockerfilePath, udt.Tags, udt.TagWithCommitSha, udt.Ref,
 		udt.PushRegistryRepo, udt.PushS3Region, udt.PushS3Bucket, udt.PushS3KeyPrefix,
 		"started", false, false, false, time.Now()).Exec()
+	if err != nil {
+		return nil, err
+	}
+	q = `INSERT INTO build_metrics_by_id (id) VALUES (?);`
+	return &id, s.Query(q, id).Exec()
 }
 
 func getBuildByID(s *gocql.Session, id gocql.UUID) (*BuildStatusResponse, error) {
@@ -89,6 +94,49 @@ func setBuildPushOutput(s *gocql.Session, id gocql.UUID, output []byte) error {
 
 // Only used in case of queue full when we can't actually do a build
 func deleteBuild(s *gocql.Session, id gocql.UUID) error {
-	q := `DELETE FROM builds_by_id WHERE id = ?;`
-	return s.Query(q, id).Exec()
+	q := `DELETE FROM builds_by_id WHERE id = ?;
+	      DELETE FROM build_metrics_by_id WHERE id = ?;`
+	return s.Query(q, id, id).Exec()
+}
+
+func setBuildTimeMetric(s *gocql.Session, id gocql.UUID, metric string) error {
+	var started time.Time
+	now := time.Now()
+	getstarted := true
+	var startedcolumn string
+	var durationcolumn string
+	switch metric {
+	case "docker_build_completed":
+		startedcolumn = "docker_build_started"
+		durationcolumn = "docker_build_duration"
+	case "push_completed":
+		startedcolumn = "push_started"
+		durationcolumn = "push_duration"
+	case "clean_completed":
+		startedcolumn = "clean_started"
+		durationcolumn = "clean_duration"
+	default:
+		getstarted = false
+	}
+	q := `UPDATE build_metrics_by_id SET %v = ? WHERE id = ?;`
+	err := s.Query(fmt.Sprintf(q, metric), now, id).Exec()
+	if err != nil {
+		return err
+	}
+	if getstarted {
+		q := `SELECT %v FROM build_metrics_by_id WHERE id = ?;`
+		err := s.Query(fmt.Sprintf(q, startedcolumn), id).Scan(&started)
+		if err != nil {
+			return err
+		}
+		duration := now.Sub(started).Seconds()
+		q = `UPDATE build_metrics_by_id SET %v = ? WHERE id = ?;`
+		return s.Query(fmt.Sprintf(q, durationcolumn), duration, id).Exec()
+	}
+	return nil
+}
+
+func setDockerImageSizesMetric(s *gocql.Session, id gocql.UUID, size int64, vsize int64) error {
+	q := `UPDATE build_metrics_by_id SET docker_image_size = ?, docker_image_vsize = ? WHERE id = ?;`
+	return s.Query(q, size, vsize, id).Exec()
 }

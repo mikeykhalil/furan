@@ -67,6 +67,10 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 // Build builds an image accourding to the request
 func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) (string, error) {
 	log.Printf("starting build %v", id.String())
+	err := setBuildTimeMetric(dbConfig.session, id, "docker_build_started")
+	if err != nil {
+		return "", err
+	}
 	rl := strings.Split(req.Build.GithubRepo, "/")
 	if len(rl) != 2 {
 		return "", fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
@@ -108,10 +112,9 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 		j = append(j, byte('\n'))
 		output = append(output, j...)
 	}
-	idstring := ctx.Value("id").(string)
-	id, err := gocql.ParseUUID(idstring)
-	if err != nil {
-		return fmt.Errorf("malformed id: %v", err)
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("build id missing from context")
 	}
 	switch action {
 	case Build:
@@ -132,6 +135,10 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	var imageid string
 	if isCancelled(ctx.Done()) {
 		return imageid, fmt.Errorf("build was cancelled: %v", ctx.Err())
+	}
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return imageid, fmt.Errorf("build id missing from context")
 	}
 	opts := dtypes.ImageBuildOptions{
 		Tags:        rbi.Tags,
@@ -161,7 +168,26 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		return imageid, fmt.Errorf("could not determine image id from final event: %v", fe.Stream)
 	}
 	log.Printf("built image ID %v", imageid)
-	return imageid, nil
+	err = setBuildTimeMetric(dbConfig.session, id, "docker_build_completed")
+	if err != nil {
+		return imageid, err
+	}
+	return imageid, ib.writeDockerImageSizeMetrics(ctx, imageid)
+}
+
+func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid string) error {
+	if isCancelled(ctx.Done()) {
+		return fmt.Errorf("build was cancelled: %v", ctx.Err())
+	}
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("build id missing from context")
+	}
+	res, _, err := ib.c.ImageInspectWithRaw(ctx, imageid, true)
+	if err != nil {
+		return err
+	}
+	return setDockerImageSizesMetric(dbConfig.session, id, res.Size, res.VirtualSize)
 }
 
 // Models for the JSON objects the Docker API returns
@@ -187,6 +213,10 @@ type dockerErrorDetail struct {
 func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser) ([]dockerStreamEvent, error) {
 	rdr := bufio.NewReader(rc)
 	output := []dockerStreamEvent{}
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return output, fmt.Errorf("build id missing from context")
+	}
 	for {
 		if isCancelled(ctx.Done()) {
 			return output, fmt.Errorf("action was cancelled: %v", ctx.Err())
@@ -198,7 +228,7 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 			}
 			return output, fmt.Errorf("error reading event stream: %v", err)
 		}
-		log.Printf("%v: %v", ctx.Value("id").(string), string(line))
+		log.Printf("%v: %v", id.String(), string(line))
 		var event dockerStreamEvent
 		err = json.Unmarshal(line, &event)
 		if err != nil {
@@ -213,7 +243,15 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("clean was cancelled: %v", ctx.Err())
 	}
-	log.Printf("Cleaning up images for %v", ctx.Value("id").(string))
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("build id missing from context")
+	}
+	log.Printf("Cleaning up images for %v", id.String())
+	err := setBuildTimeMetric(dbConfig.session, id, "clean_started")
+	if err != nil {
+		return err
+	}
 	opts := dtypes.ImageRemoveOptions{
 		Force:         true,
 		PruneChildren: true,
@@ -222,7 +260,10 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	for _, r := range resp {
 		log.Printf("ImageDelete: %v", r)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return setBuildTimeMetric(dbConfig.session, id, "clean_completed")
 }
 
 // PushBuildToRegistry pushes the already built image and all associated tags to the
@@ -232,7 +273,15 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
-	log.Printf("doing push for %v", ctx.Value("id").(string))
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("build id missing from context")
+	}
+	log.Printf("doing push for %v", id.String())
+	err := setBuildTimeMetric(dbConfig.session, id, "push_started")
+	if err != nil {
+		return err
+	}
 	repo := req.Push.Registry.Repo
 	if repo == "" {
 		return fmt.Errorf("PushBuildToRegistry called but repo is empty")
@@ -275,6 +324,10 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		if err != nil {
 			return err
 		}
+	}
+	err = setBuildTimeMetric(dbConfig.session, id, "push_completed")
+	if err != nil {
+		return err
 	}
 	return ib.saveOutput(ctx, Push, output)
 }

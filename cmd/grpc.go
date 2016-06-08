@@ -54,9 +54,24 @@ func (gr *grpcserver) finishBuild(id gocql.UUID, failed bool) error {
 	return setBuildFlags(dbConfig.session, id, flags)
 }
 
+const (
+	ctxIDKey = "id"
+)
+
+// NewBuildIDContext returns a context with the current build ID stored as a value
+func NewBuildIDContext(ctx context.Context, id gocql.UUID) context.Context {
+	return context.WithValue(ctx, ctxIDKey, id)
+}
+
+// BuildIDFromContext returns the ID stored in ctx, if any
+func BuildIDFromContext(ctx context.Context) (gocql.UUID, bool) {
+	id, ok := ctx.Value(ctxIDKey).(gocql.UUID)
+	return id, ok
+}
+
 // Performs build synchronously
 func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql.UUID) {
-	ctx = context.WithValue(ctx, "id", id.String())
+	ctx = NewBuildIDContext(ctx, id)
 	builder, err := NewImageBuilder(gitConfig.token)
 	if err != nil {
 		gr.finishBuild(id, true)

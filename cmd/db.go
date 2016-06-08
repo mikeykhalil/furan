@@ -118,6 +118,23 @@ var requiredTables = []cassandra.CTable{
 			"duration double",
 		},
 	},
+	cassandra.CTable{
+		Name: "build_metrics_by_id",
+		Columns: []string{
+			"id uuid PRIMARY KEY",
+			"docker_build_started timestamp",
+			"docker_build_completed timestamp",
+			"docker_build_duration double",
+			"push_started timestamp",
+			"push_completed timestamp",
+			"push_duration double",
+			"clean_started timestamp",
+			"clean_completed timestamp",
+			"clean_duration double",
+			"docker_image_size bigint",
+			"docker_image_vsize bigint",
+		},
+	},
 }
 
 // GetNodesFromConsul queries the local Consul agent for the given service,
