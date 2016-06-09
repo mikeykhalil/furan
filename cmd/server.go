@@ -27,7 +27,7 @@ type serverconfig struct {
 type kafkaconfig struct {
 	brokers      []string
 	topic        string
-	producer     *KafkaProducer
+	manager      EventBusManager
 	maxOpenSends uint
 }
 
