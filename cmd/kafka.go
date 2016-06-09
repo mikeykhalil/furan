@@ -10,10 +10,6 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
-const (
-	maxOpenSends = 50 // How many async Kafka sends can be in-flight before sending blocks
-)
-
 func setupKafka() {
 	kafkaConfig.brokers = strings.Split(kafkaBrokerStr, ",")
 	if len(kafkaConfig.brokers) < 1 {
@@ -22,7 +18,7 @@ func setupKafka() {
 	if kafkaConfig.topic == "" {
 		log.Fatalf("Kafka topic is required")
 	}
-	kp, err := NewKafkaProducer(kafkaConfig.brokers, kafkaConfig.topic)
+	kp, err := NewKafkaProducer(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends)
 	if err != nil {
 		log.Fatalf("Error creating Kafka producer: %v", err)
 	}
@@ -41,9 +37,9 @@ type KafkaProducer struct {
 }
 
 // NewKafkaProducer returns a new Kafka producer object
-func NewKafkaProducer(brokers []string, topic string) (*KafkaProducer, error) {
+func NewKafkaProducer(brokers []string, topic string, maxsends uint) (*KafkaProducer, error) {
 	conf := sarama.NewConfig()
-	conf.Net.MaxOpenRequests = maxOpenSends
+	conf.Net.MaxOpenRequests = int(maxsends)
 	conf.Producer.Return.Errors = true
 	asyncp, err := sarama.NewAsyncProducer(brokers, conf)
 	if err != nil {

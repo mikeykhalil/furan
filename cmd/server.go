@@ -25,9 +25,10 @@ type serverconfig struct {
 }
 
 type kafkaconfig struct {
-	brokers  []string
-	topic    string
-	producer *KafkaProducer
+	brokers      []string
+	topic        string
+	producer     *KafkaProducer
+	maxOpenSends uint
 }
 
 var serverConfig serverconfig
@@ -56,6 +57,7 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
 	serverCmd.PersistentFlags().StringVar(&kafkaBrokerStr, "kafka-brokers", "localhost:9092", "Comma-delimited list of Kafka brokers")
 	serverCmd.PersistentFlags().StringVar(&kafkaConfig.topic, "kafka-topic", "furan-events", "Kafka topic to publish build events (required for build monitoring)")
+	serverCmd.PersistentFlags().UintVar(&kafkaConfig.maxOpenSends, "kafka-max-open-sends", 100, "Max number of simultaneous in-flight Kafka message sends")
 	RootCmd.AddCommand(serverCmd)
 }
 
