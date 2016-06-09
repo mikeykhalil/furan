@@ -24,10 +24,19 @@ type serverconfig struct {
 	tlsKey           []byte
 }
 
+type kafkaconfig struct {
+	brokers  []string
+	topic    string
+	producer *KafkaProducer
+}
+
 var serverConfig serverconfig
+var kafkaConfig kafkaconfig
 
 var version = "0"
 var description = "unknown"
+
+var kafkaBrokerStr string
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
@@ -45,12 +54,15 @@ func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.queuesize, "queue", 100, "Max queue size for buffered build requests")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSCertPath, "tls-cert-path", "/tls/cert", "Vault path to TLS certificate")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
+	serverCmd.PersistentFlags().StringVar(&kafkaBrokerStr, "kafka-brokers", "localhost:9092", "Comma-delimited list of Kafka brokers")
+	serverCmd.PersistentFlags().StringVar(&kafkaConfig.topic, "kafka-topic", "furan-events", "Kafka topic to publish build events (required for build monitoring)")
 	RootCmd.AddCommand(serverCmd)
 }
 
 func server(cmd *cobra.Command, args []string) {
 	setupVault()
 	setupDB()
+	setupKafka()
 	certPath, keyPath := writeTLSCert()
 	defer rmTempFiles(certPath, keyPath)
 	err := readDockercfg()

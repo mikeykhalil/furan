@@ -17,6 +17,12 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// CodeFetcher represents an object capable of fetching code and returning a
+// gzip-compressed tarball io.Reader
+type CodeFetcher interface {
+	Get(string, string, string) (io.Reader, error)
+}
+
 // GitHubFetcher represents a github data fetcher
 type GitHubFetcher struct {
 	c *github.Client

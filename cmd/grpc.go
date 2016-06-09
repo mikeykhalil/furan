@@ -20,7 +20,6 @@ var workerChan chan *workerRequest
 type workerRequest struct {
 	ctx context.Context
 	req *BuildRequest
-	id  gocql.UUID
 }
 
 func buildWorker() {
@@ -28,7 +27,7 @@ func buildWorker() {
 	for {
 		wreq = <-workerChan
 		if !isCancelled(wreq.ctx.Done()) {
-			grpcServer.syncBuild(wreq.ctx, wreq.req, wreq.id)
+			grpcServer.syncBuild(wreq.ctx, wreq.req)
 		}
 	}
 }
@@ -54,9 +53,9 @@ func (gr *grpcserver) finishBuild(id gocql.UUID, failed bool) error {
 	return setBuildFlags(dbConfig.session, id, flags)
 }
 
-const (
-	ctxIDKey = "id"
-)
+type ctxIDKeyType string
+
+var ctxIDKey ctxIDKeyType = "id"
 
 // NewBuildIDContext returns a context with the current build ID stored as a value
 func NewBuildIDContext(ctx context.Context, id gocql.UUID) context.Context {
@@ -70,9 +69,16 @@ func BuildIDFromContext(ctx context.Context) (gocql.UUID, bool) {
 }
 
 // Performs build synchronously
-func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest, id gocql.UUID) {
-	ctx = NewBuildIDContext(ctx, id)
-	builder, err := NewImageBuilder(gitConfig.token)
+func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest) {
+	if isCancelled(ctx.Done()) {
+		log.Printf("build was cancelled")
+	}
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		log.Printf("build id missing from context")
+		return
+	}
+	builder, err := NewImageBuilder(gitConfig.token, kafkaConfig.producer)
 	if err != nil {
 		gr.finishBuild(id, true)
 		log.Printf("%v: error creating image builder: %v", id.String(), err)
@@ -152,17 +158,17 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 		resp.Error.ErrorMsg = fmt.Sprintf("error creating build in DB: %v", err)
 		return resp, nil
 	}
+	ctx = NewBuildIDContext(ctx, id)
 	wreq := workerRequest{
 		ctx: ctx,
 		req: req,
-		id:  *id,
 	}
 	select {
 	case workerChan <- &wreq:
 		resp.BuildId = id.String()
 		return resp, nil
 	default:
-		err = deleteBuild(dbConfig.session, *id)
+		err = deleteBuild(dbConfig.session, id)
 		if err != nil {
 			log.Printf("error deleting build from DB: %v", err)
 		}

@@ -85,3 +85,27 @@ message BuildStatusResponse {
   string completed = 11;
   double duration = 12;
 }
+
+// Messages server-streamed and/or published to Kafka
+
+message BuildEventError {
+  enum ErrorType {
+    FATAL = 0;
+    TEMPORARY = 1;
+    NO_ERROR = 3;
+  }
+  bool is_error = 1;
+  ErrorType error_type = 2;
+}
+
+message BuildEvent {
+  enum EventType {
+    DOCKER_BUILD_STREAM = 0;
+    DOCKER_PUSH_STREAM = 1;
+    LOG = 2;
+  }
+  BuildEventError error = 1;
+  EventType event_type = 2;
+  string build_id = 3;
+  string message = 4;
+}

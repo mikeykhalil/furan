@@ -7,24 +7,24 @@ import (
 	"github.com/gocql/gocql"
 )
 
-func createBuild(s *gocql.Session, req *BuildRequest) (*gocql.UUID, error) {
+func createBuild(s *gocql.Session, req *BuildRequest) (gocql.UUID, error) {
 	q := `INSERT INTO builds_by_id (id, request, state, finished, failed, cancelled, started)
         VALUES (?,{github_repo: ?, dockerfile_path: ?, tags: ?, tag_with_commit_sha: ?, ref: ?,
 					push_registry_repo: ?, push_s3_region: ?, push_s3_bucket: ?,
 					push_s3_key_prefix: ?},?,?,?,?,?);`
 	id, err := gocql.RandomUUID()
 	if err != nil {
-		return nil, err
+		return id, err
 	}
 	udt := udtFromBuildRequest(req)
 	err = s.Query(q, id, udt.GithubRepo, udt.DockerfilePath, udt.Tags, udt.TagWithCommitSha, udt.Ref,
 		udt.PushRegistryRepo, udt.PushS3Region, udt.PushS3Bucket, udt.PushS3KeyPrefix,
 		"started", false, false, false, time.Now()).Exec()
 	if err != nil {
-		return nil, err
+		return id, err
 	}
 	q = `INSERT INTO build_metrics_by_id (id) VALUES (?);`
-	return &id, s.Query(q, id).Exec()
+	return id, s.Query(q, id).Exec()
 }
 
 func getBuildByID(s *gocql.Session, id gocql.UUID) (*BuildStatusResponse, error) {

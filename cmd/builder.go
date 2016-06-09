@@ -24,6 +24,16 @@ const (
 	Push                    // Push is a registry push
 )
 
+func buildEventTypeFromActionType(atype actionType) BuildEvent_EventType {
+	switch atype {
+	case Build:
+		return BuildEvent_DOCKER_BUILD_STREAM
+	case Push:
+		return BuildEvent_DOCKER_PUSH_STREAM
+	}
+	return -1 // unreachable
+}
+
 // RepoBuildData contains data about a GitHub repo necessary to do a Docker build
 type RepoBuildData struct {
 	DockerfilePath string
@@ -31,14 +41,24 @@ type RepoBuildData struct {
 	Tags           []string //{name}:{tag}
 }
 
+// ImageBuildClient describes a client that can build & push images
+// Add whatever Docker API methods we care about here
+type ImageBuildClient interface {
+	ImageBuild(context.Context, io.Reader, dtypes.ImageBuildOptions) (dtypes.ImageBuildResponse, error)
+	ImageInspectWithRaw(context.Context, string, bool) (dtypes.ImageInspect, []byte, error)
+	ImageRemove(context.Context, string, dtypes.ImageRemoveOptions) ([]dtypes.ImageDelete, error)
+	ImagePush(context.Context, string, dtypes.ImagePushOptions) (io.ReadCloser, error)
+}
+
 // ImageBuilder is an object that builds and pushes images
 type ImageBuilder struct {
-	c  *docker.Client
-	gf *GitHubFetcher
+	c  ImageBuildClient
+	gf CodeFetcher
+	ep EventBusProducer
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(ghtoken string) (*ImageBuilder, error) {
+func NewImageBuilder(ghtoken string, eventbus EventBusProducer) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	dc, err := docker.NewEnvClient()
 	ib.gf = NewGitHubFetcher(ghtoken)
@@ -46,7 +66,40 @@ func NewImageBuilder(ghtoken string) (*ImageBuilder, error) {
 		return ib, err
 	}
 	ib.c = dc
+	ib.ep = eventbus
 	return ib, nil
+}
+
+func (ib *ImageBuilder) log(ctx context.Context, msg string, params ...interface{}) {
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		log.Printf("build id missing from context")
+		return
+	}
+	msg = fmt.Sprintf("%v: %v", id.String(), msg)
+	log.Printf(msg, params...)
+	go func() {
+		err := ib.ep.PublishEvent(id, fmt.Sprintf(msg, params...), BuildEvent_LOG, BuildEventError_NO_ERROR)
+		if err != nil {
+			log.Printf("error pushing event to bus: %v", err)
+		}
+	}()
+}
+
+func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
+	errtype BuildEventError_ErrorType, msg string) {
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		log.Printf("build id missing from context")
+		return
+	}
+	log.Printf("%v: %v", id.String(), msg)
+	go func() {
+		err := ib.ep.PublishEvent(id, msg, etype, errtype)
+		if err != nil {
+			log.Printf("error pushing event to bus: %v", err)
+		}
+	}()
 }
 
 // Returns full docker name:tag strings from the supplied repo/tags
@@ -66,7 +119,7 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 
 // Build builds an image accourding to the request
 func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) (string, error) {
-	log.Printf("starting build %v", id.String())
+	ib.log(ctx, "starting build")
 	err := setBuildTimeMetric(dbConfig.session, id, "docker_build_started")
 	if err != nil {
 		return "", err
@@ -80,7 +133,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	if isCancelled(ctx.Done()) {
 		return "", fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
-	log.Printf("%v: fetching github repo: %v", id.String(), req.Build.GithubRepo)
+	ib.log(ctx, "fetching github repo: %v", req.Build.GithubRepo)
 	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
 	if err != nil {
 		return "", err
@@ -152,7 +205,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	if err != nil {
 		return imageid, fmt.Errorf("error starting build: %v", err)
 	}
-	output, err := ib.monitorDockerAction(ctx, ibr.Body)
+	output, err := ib.monitorDockerAction(ctx, ibr.Body, Build)
 	err2 := ib.saveOutput(ctx, Build, output) // we want to save output even if error
 	if err != nil {
 		return imageid, err
@@ -167,7 +220,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	} else {
 		return imageid, fmt.Errorf("could not determine image id from final event: %v", fe.Stream)
 	}
-	log.Printf("built image ID %v", imageid)
+	ib.log(ctx, "built image ID %v", imageid)
 	err = setBuildTimeMetric(dbConfig.session, id, "docker_build_completed")
 	if err != nil {
 		return imageid, err
@@ -209,14 +262,10 @@ type dockerErrorDetail struct {
 	Message string `json:"message"`
 }
 
-// monitorDockerAction reads the Docker API response stream and detects any errors
-func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser) ([]dockerStreamEvent, error) {
+// monitorDockerAction reads the Docker API response stream
+func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser, atype actionType) ([]dockerStreamEvent, error) {
 	rdr := bufio.NewReader(rc)
 	output := []dockerStreamEvent{}
-	id, ok := BuildIDFromContext(ctx)
-	if !ok {
-		return output, fmt.Errorf("build id missing from context")
-	}
 	for {
 		if isCancelled(ctx.Done()) {
 			return output, fmt.Errorf("action was cancelled: %v", ctx.Err())
@@ -228,12 +277,18 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 			}
 			return output, fmt.Errorf("error reading event stream: %v", err)
 		}
-		log.Printf("%v: %v", id.String(), string(line))
 		var event dockerStreamEvent
 		err = json.Unmarshal(line, &event)
 		if err != nil {
 			return output, fmt.Errorf("error unmarshaling event: %v (event: %v)", err, string(line))
 		}
+		var errtype BuildEventError_ErrorType
+		if event.Error != "" {
+			errtype = BuildEventError_FATAL
+		} else {
+			errtype = BuildEventError_NO_ERROR
+		}
+		ib.event(ctx, buildEventTypeFromActionType(atype), errtype, string(line))
 		output = append(output, event)
 	}
 }
@@ -247,7 +302,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
-	log.Printf("Cleaning up images for %v", id.String())
+	ib.log(ctx, "cleaning up images")
 	err := setBuildTimeMetric(dbConfig.session, id, "clean_started")
 	if err != nil {
 		return err
@@ -258,7 +313,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	}
 	resp, err := ib.c.ImageRemove(ctx, imageid, opts)
 	for _, r := range resp {
-		log.Printf("ImageDelete: %v", r)
+		ib.log(ctx, "ImageDelete: %v", r)
 	}
 	if err != nil {
 		return err
@@ -277,7 +332,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
-	log.Printf("doing push for %v", id.String())
+	ib.log(ctx, "pushing")
 	err := setBuildTimeMetric(dbConfig.session, id, "push_started")
 	if err != nil {
 		return err
@@ -319,7 +374,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		if err != nil {
 			return fmt.Errorf("error initiating registry push: %v", err)
 		}
-		o, err := ib.monitorDockerAction(ctx, ipr)
+		o, err := ib.monitorDockerAction(ctx, ipr, Push)
 		output = append(output, o...)
 		if err != nil {
 			return err
@@ -329,6 +384,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	if err != nil {
 		return err
 	}
+	ib.log(ctx, "push completed")
 	return ib.saveOutput(ctx, Push, output)
 }
 
