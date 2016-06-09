@@ -12,6 +12,8 @@ import (
 )
 
 type grpcserver struct {
+	ib ImageBuildPusher
+	dl DataLayer
 }
 
 var grpcServer grpcserver
@@ -20,6 +22,21 @@ var workerChan chan *workerRequest
 type workerRequest struct {
 	ctx context.Context
 	req *BuildRequest
+}
+
+func startgRPC() {
+	imageBuilder, err := NewImageBuilder(gitConfig.token, kafkaConfig.producer, dbConfig.datalayer)
+	if err != nil {
+		log.Fatalf("error creating image builder: %v", err)
+	}
+
+	grpcServer = grpcserver{
+		ib: imageBuilder,
+		dl: dbConfig.datalayer,
+	}
+
+	runWorkers()
+	go listenRPC()
 }
 
 func buildWorker() {
@@ -50,7 +67,7 @@ func (gr *grpcserver) finishBuild(id gocql.UUID, failed bool) error {
 		"failed":   failed,
 		"finished": true,
 	}
-	return setBuildFlags(dbConfig.session, id, flags)
+	return gr.dl.SetBuildFlags(id, flags)
 }
 
 type ctxIDKeyType string
@@ -78,50 +95,44 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest) {
 		log.Printf("build id missing from context")
 		return
 	}
-	builder, err := NewImageBuilder(gitConfig.token, kafkaConfig.producer)
-	if err != nil {
-		gr.finishBuild(id, true)
-		log.Printf("%v: error creating image builder: %v", id.String(), err)
-		return
-	}
-	err = setBuildState(dbConfig.session, id, BuildStatusResponse_BUILDING)
+	err := gr.dl.SetBuildState(id, BuildStatusResponse_BUILDING)
 	if err != nil {
 		gr.finishBuild(id, true)
 		log.Printf("error setting build state to building: %v", err)
 		return
 	}
-	imageid, err := builder.Build(ctx, req, id)
+	imageid, err := gr.ib.Build(ctx, req, id)
 	if err != nil {
 		log.Printf("error performing build: %v", err)
-		setBuildState(dbConfig.session, id, BuildStatusResponse_BUILD_FAILURE)
+		gr.dl.SetBuildState(id, BuildStatusResponse_BUILD_FAILURE)
 		gr.finishBuild(id, true)
 		return
 	}
-	err = setBuildState(dbConfig.session, id, BuildStatusResponse_PUSHING)
+	err = gr.dl.SetBuildState(id, BuildStatusResponse_PUSHING)
 	if err != nil {
 		gr.finishBuild(id, true)
 		log.Printf("error setting build state to pushing: %v", err)
 		return
 	}
 	if req.Push.Registry.Repo == "" {
-		err = builder.PushBuildToS3(ctx, req)
+		err = gr.ib.PushBuildToS3(ctx, req)
 	} else {
-		err = builder.PushBuildToRegistry(ctx, req)
+		err = gr.ib.PushBuildToRegistry(ctx, req)
 	}
 	if err != nil {
 		gr.finishBuild(id, true)
-		setBuildState(dbConfig.session, id, BuildStatusResponse_PUSH_FAILURE)
+		gr.dl.SetBuildState(id, BuildStatusResponse_PUSH_FAILURE)
 		log.Printf("error pushing: %v", err)
 		return
 	}
-	err = builder.CleanImage(ctx, imageid)
+	err = gr.ib.CleanImage(ctx, imageid)
 	if err != nil {
 		gr.finishBuild(id, true)
-		setBuildState(dbConfig.session, id, BuildStatusResponse_PUSH_FAILURE)
+		gr.dl.SetBuildState(id, BuildStatusResponse_PUSH_FAILURE)
 		log.Printf("error cleaning built image: %v", err)
 		return
 	}
-	err = setBuildState(dbConfig.session, id, BuildStatusResponse_SUCCESS)
+	err = gr.dl.SetBuildState(id, BuildStatusResponse_SUCCESS)
 	if err != nil {
 		gr.finishBuild(id, true)
 		log.Printf("error setting build state to success: %v", err)
@@ -131,7 +142,7 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest) {
 	if err != nil {
 		log.Printf("error finalizing build: %v", err)
 	}
-	err = setBuildCompletedTimestamp(dbConfig.session, id)
+	err = gr.dl.SetBuildCompletedTimestamp(id)
 	if err != nil {
 		log.Printf("error setting build completed timestamp: %v", err)
 	}
@@ -151,7 +162,7 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 			return resp, nil
 		}
 	}
-	id, err := createBuild(dbConfig.session, req)
+	id, err := gr.dl.CreateBuild(req)
 	if err != nil {
 		resp.Error.ErrorType = RPCError_INTERNAL_ERROR
 		resp.Error.IsError = true
@@ -168,7 +179,7 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 		resp.BuildId = id.String()
 		return resp, nil
 	default:
-		err = deleteBuild(dbConfig.session, id)
+		err = gr.dl.DeleteBuild(id)
 		if err != nil {
 			log.Printf("error deleting build from DB: %v", err)
 		}
@@ -190,7 +201,7 @@ func (gr *grpcserver) GetBuildStatus(ctx context.Context, req *BuildStatusReques
 		resp.Error.ErrorType = RPCError_BAD_REQUEST
 		return resp, nil
 	}
-	resp, err = getBuildByID(dbConfig.session, id)
+	resp, err = gr.dl.GetBuildByID(id)
 	if err != nil {
 		if err == gocql.ErrNotFound {
 			resp.Error.ErrorType = RPCError_BAD_REQUEST

@@ -50,15 +50,24 @@ type ImageBuildClient interface {
 	ImagePush(context.Context, string, dtypes.ImagePushOptions) (io.ReadCloser, error)
 }
 
+// ImageBuildPusher describes an object that can build and push container images
+type ImageBuildPusher interface {
+	Build(context.Context, *BuildRequest, gocql.UUID) (string, error)
+	CleanImage(context.Context, string) error
+	PushBuildToRegistry(context.Context, *BuildRequest) error
+	PushBuildToS3(context.Context, *BuildRequest) error
+}
+
 // ImageBuilder is an object that builds and pushes images
 type ImageBuilder struct {
 	c  ImageBuildClient
 	gf CodeFetcher
 	ep EventBusProducer
+	dl DataLayer
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(ghtoken string, eventbus EventBusProducer) (*ImageBuilder, error) {
+func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	dc, err := docker.NewEnvClient()
 	ib.gf = NewGitHubFetcher(ghtoken)
@@ -67,6 +76,7 @@ func NewImageBuilder(ghtoken string, eventbus EventBusProducer) (*ImageBuilder, 
 	}
 	ib.c = dc
 	ib.ep = eventbus
+	ib.dl = datalayer
 	return ib, nil
 }
 
@@ -120,7 +130,7 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 // Build builds an image accourding to the request
 func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) (string, error) {
 	ib.log(ctx, "starting build")
-	err := setBuildTimeMetric(dbConfig.session, id, "docker_build_started")
+	err := ib.dl.SetBuildTimeMetric(id, "docker_build_started")
 	if err != nil {
 		return "", err
 	}
@@ -171,9 +181,9 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 	}
 	switch action {
 	case Build:
-		return setBuildImageBuildOutput(dbConfig.session, id, output)
+		return ib.dl.SetBuildImageBuildOutput(id, output)
 	case Push:
-		return setBuildPushOutput(dbConfig.session, id, output)
+		return ib.dl.SetBuildPushOutput(id, output)
 	default:
 		return fmt.Errorf("unknown action: %v", action)
 	}
@@ -221,7 +231,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		return imageid, fmt.Errorf("could not determine image id from final event: %v", fe.Stream)
 	}
 	ib.log(ctx, "built image ID %v", imageid)
-	err = setBuildTimeMetric(dbConfig.session, id, "docker_build_completed")
+	err = ib.dl.SetBuildTimeMetric(id, "docker_build_completed")
 	if err != nil {
 		return imageid, err
 	}
@@ -240,7 +250,7 @@ func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid
 	if err != nil {
 		return err
 	}
-	return setDockerImageSizesMetric(dbConfig.session, id, res.Size, res.VirtualSize)
+	return ib.dl.SetDockerImageSizesMetric(id, res.Size, res.VirtualSize)
 }
 
 // Models for the JSON objects the Docker API returns
@@ -303,7 +313,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 		return fmt.Errorf("build id missing from context")
 	}
 	ib.log(ctx, "cleaning up images")
-	err := setBuildTimeMetric(dbConfig.session, id, "clean_started")
+	err := ib.dl.SetBuildTimeMetric(id, "clean_started")
 	if err != nil {
 		return err
 	}
@@ -318,7 +328,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	if err != nil {
 		return err
 	}
-	return setBuildTimeMetric(dbConfig.session, id, "clean_completed")
+	return ib.dl.SetBuildTimeMetric(id, "clean_completed")
 }
 
 // PushBuildToRegistry pushes the already built image and all associated tags to the
@@ -333,7 +343,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		return fmt.Errorf("build id missing from context")
 	}
 	ib.log(ctx, "pushing")
-	err := setBuildTimeMetric(dbConfig.session, id, "push_started")
+	err := ib.dl.SetBuildTimeMetric(id, "push_started")
 	if err != nil {
 		return err
 	}
@@ -380,7 +390,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 			return err
 		}
 	}
-	err = setBuildTimeMetric(dbConfig.session, id, "push_completed")
+	err = ib.dl.SetBuildTimeMetric(id, "push_completed")
 	if err != nil {
 		return err
 	}

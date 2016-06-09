@@ -21,7 +21,7 @@ type dbconfig struct {
 	consulServiceName string
 	dataCenters       []string
 	cluster           *gocql.ClusterConfig
-	session           *gocql.Session
+	datalayer         DataLayer
 }
 
 var dbConfig dbconfig
@@ -173,12 +173,12 @@ func connectToDB() {
 	dbConfig.cluster.SocketKeepalive = 30 * time.Second
 }
 
-func setupDBSession() {
+func setupDataLayer() {
 	s, err := dbConfig.cluster.CreateSession()
 	if err != nil {
 		log.Fatalf("error creating DB session: %v", err)
 	}
-	dbConfig.session = s
+	dbConfig.datalayer = NewDBLayer(s)
 }
 
 func initDB() {
@@ -210,5 +210,5 @@ func setupDB() {
 	dbConfig.dataCenters = strings.Split(datacenterstr, ",")
 	connectToDB()
 	initDB()
-	setupDBSession()
+	setupDataLayer()
 }

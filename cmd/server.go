@@ -70,8 +70,7 @@ func server(cmd *cobra.Command, args []string) {
 		log.Fatalf("error reading dockercfg: %v", err)
 	}
 
-	runWorkers()
-	go listenRPC()
+	startgRPC()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
