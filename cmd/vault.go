@@ -51,7 +51,12 @@ func setupVault() {
 	if err != nil {
 		log.Fatalf("Error getting GitHub token: %v", err)
 	}
+	dcc, err := vc.GetValue(vaultPath(dockerConfig.dockercfgVaultPath))
+	if err != nil {
+		log.Fatalf("Error getting dockercfg: %v", err)
+	}
 	gitConfig.token = safeStringCast(ght)
+	dockerConfig.dockercfgRaw = safeStringCast(dcc)
 }
 
 // TLS cert/key are retrieved from Vault and must be written to temp files

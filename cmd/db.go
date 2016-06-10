@@ -10,11 +10,6 @@ import (
 	consul "github.com/hashicorp/consul/api"
 )
 
-const (
-	keyspace               = "furan"
-	replicationFactorPerDC = 2
-)
-
 type dbconfig struct {
 	nodes             []string
 	useConsul         bool
@@ -22,6 +17,8 @@ type dbconfig struct {
 	dataCenters       []string
 	cluster           *gocql.ClusterConfig
 	datalayer         DataLayer
+	keyspace          string
+	rfPerDC           uint
 }
 
 var dbConfig dbconfig
@@ -81,7 +78,7 @@ func buildStateFromString(state string) BuildStatusResponse_BuildState {
 	if val, ok := BuildStatusResponse_BuildState_value[state]; ok {
 		return BuildStatusResponse_BuildState(val)
 	}
-	log.Fatalf("build state '%v' not found in enum! state protobuf definition?", state)
+	log.Fatalf("build state '%v' not found in enum! stale protobuf definition?", state)
 	return BuildStatusResponse_BUILDING //unreachable
 }
 
@@ -184,9 +181,9 @@ func setupDataLayer() {
 func initDB() {
 	rfmap := map[string]uint{}
 	for _, dc := range dbConfig.dataCenters {
-		rfmap[dc] = replicationFactorPerDC
+		rfmap[dc] = dbConfig.rfPerDC
 	}
-	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.cluster, keyspace, rfmap)
+	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.cluster, dbConfig.keyspace, rfmap)
 	if err != nil {
 		log.Fatalf("error creating keyspace: %v", err)
 	}
@@ -200,7 +197,7 @@ func initDB() {
 	}
 }
 
-func setupDB() {
+func setupDB(initdb bool) {
 	dbConfig.nodes = strings.Split(nodestr, ",")
 	if !dbConfig.useConsul {
 		if len(dbConfig.nodes) == 0 || dbConfig.nodes[0] == "" {
@@ -209,6 +206,9 @@ func setupDB() {
 	}
 	dbConfig.dataCenters = strings.Split(datacenterstr, ",")
 	connectToDB()
-	initDB()
+	if initdb {
+		initDB()
+	}
+	dbConfig.cluster.Keyspace = dbConfig.keyspace
 	setupDataLayer()
 }

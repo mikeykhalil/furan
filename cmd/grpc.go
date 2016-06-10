@@ -7,12 +7,14 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"regexp"
 
 	"github.com/gocql/gocql"
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 )
 
 type grpcserver struct {
@@ -20,9 +22,10 @@ type grpcserver struct {
 	dl DataLayer
 	ep EventBusProducer
 	ec EventBusConsumer
+	ls io.Writer
 }
 
-var grpcServer grpcserver
+var grpcServer *grpcserver
 var workerChan chan *workerRequest
 
 type workerRequest struct {
@@ -31,20 +34,26 @@ type workerRequest struct {
 }
 
 func startgRPC() {
-	imageBuilder, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer)
+	imageBuilder, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, os.Stdout)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}
 
-	grpcServer = grpcserver{
-		ib: imageBuilder,
-		dl: dbConfig.datalayer,
-		ep: kafkaConfig.manager,
-		ec: kafkaConfig.manager,
-	}
+	grpcServer = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, os.Stdout)
 
 	runWorkers()
 	go listenRPC()
+}
+
+// NewGRPCServer returns a new instance of the gRPC server
+func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec EventBusConsumer, logsink io.Writer) *grpcserver {
+	return &grpcserver{
+		ib: ib,
+		dl: dl,
+		ep: ep,
+		ec: ec,
+		ls: logsink,
+	}
 }
 
 func buildWorker() {
@@ -65,7 +74,7 @@ func listenRPC() {
 		return
 	}
 	s := grpc.NewServer()
-	RegisterFuranExecutorServer(s, &grpcServer)
+	RegisterFuranExecutorServer(s, grpcServer)
 	log.Printf("gRPC listening on: %v", addr)
 	s.Serve(l)
 }
@@ -85,12 +94,16 @@ func BuildIDFromContext(ctx context.Context) (gocql.UUID, bool) {
 	return id, ok
 }
 
+func (gr *grpcserver) log(msg string, params ...interface{}) {
+	gr.ls.Write([]byte(fmt.Sprintf(msg, params...)))
+}
+
 // Performs build synchronously
 func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest) (outcome BuildStatusResponse_BuildState) {
 	var err error // so deferred finalize function has access to any error
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
-		log.Printf("build id missing from context")
+		gr.log("build id missing from context")
 		return
 	}
 	// Finalize build and send event. Failures should set err and return the appropriate build state.
@@ -113,15 +126,15 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 			msg = "build finished"
 		}
 		if err2 := gr.dl.SetBuildState(id, outcome); err2 != nil {
-			log.Printf("failBuild: error setting build state: %v", err2)
+			gr.log("failBuild: error setting build state: %v", err2)
 		}
 		if err2 := gr.dl.SetBuildFlags(id, flags); err2 != nil {
-			log.Printf("failBuild: error setting build flags: %v", err2)
+			gr.log("failBuild: error setting build flags: %v", err2)
 		}
-		if err2 := gr.ep.PublishEvent(id, msg, BuildEvent_LOG, eet); err2 != nil {
-			log.Printf("failBuild: error publishing event: %v", err2)
+		if err2 := gr.ep.PublishEvent(id, msg, BuildEvent_LOG, eet, true); err2 != nil {
+			gr.log("failBuild: error publishing event: %v", err2)
 		}
-		log.Printf("%v: %v: failed: %v", id.String(), msg, flags["failed"])
+		gr.log("%v: %v: failed: %v", id.String(), msg, flags["failed"])
 	}(id)
 	if isCancelled(ctx.Done()) {
 		err = fmt.Errorf("build was cancelled")
@@ -171,23 +184,15 @@ func (gr *grpcserver) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 
 // gRPC handlers
 func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*BuildRequestResponse, error) {
-	resp := &BuildRequestResponse{
-		Error: &RPCError{},
-	}
+	resp := &BuildRequestResponse{}
 	if req.Push.Registry.Repo == "" {
 		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
-			resp.Error.ErrorType = RPCError_BAD_REQUEST
-			resp.Error.IsError = true
-			resp.Error.ErrorMsg = "push registry and S3 configuration are both empty (at least one is required)"
-			return resp, nil
+			return nil, grpc.Errorf(codes.InvalidArgument, "must specify either registry repo or S3 region/bucket/key-prefix")
 		}
 	}
 	id, err := gr.dl.CreateBuild(req)
 	if err != nil {
-		resp.Error.ErrorType = RPCError_INTERNAL_ERROR
-		resp.Error.IsError = true
-		resp.Error.ErrorMsg = fmt.Sprintf("error creating build in DB: %v", err)
-		return resp, nil
+		return nil, grpc.Errorf(codes.Internal, "error creating build in DB: %v", err)
 	}
 	ctx = NewBuildIDContext(ctx, id)
 	wreq := workerRequest{
@@ -201,35 +206,25 @@ func (gr *grpcserver) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 	default:
 		err = gr.dl.DeleteBuild(id)
 		if err != nil {
-			log.Printf("error deleting build from DB: %v", err)
+			gr.log("error deleting build from DB: %v", err)
 		}
-		resp.Error.IsError = true
-		resp.Error.ErrorType = RPCError_BAD_REQUEST
-		resp.Error.ErrorMsg = "build queue is full; try again later"
-		return resp, nil
+		return nil, grpc.Errorf(codes.ResourceExhausted, "build queue is full; try again later")
 	}
 }
 
 func (gr *grpcserver) GetBuildStatus(ctx context.Context, req *BuildStatusRequest) (*BuildStatusResponse, error) {
-	resp := &BuildStatusResponse{
-		Error: &RPCError{},
-	}
+	resp := &BuildStatusResponse{}
 	id, err := gocql.ParseUUID(req.BuildId)
 	if err != nil {
-		resp.Error.IsError = true
-		resp.Error.ErrorMsg = fmt.Sprintf("bad id: %v", err)
-		resp.Error.ErrorType = RPCError_BAD_REQUEST
-		return resp, nil
+		return nil, grpc.Errorf(codes.InvalidArgument, "bad id: %v", err)
 	}
 	resp, err = gr.dl.GetBuildByID(id)
 	if err != nil {
 		if err == gocql.ErrNotFound {
-			resp.Error.ErrorType = RPCError_BAD_REQUEST
+			return nil, grpc.Errorf(codes.InvalidArgument, "build not found")
 		} else {
-			resp.Error.ErrorType = RPCError_INTERNAL_ERROR
+			return nil, grpc.Errorf(codes.Internal, "error getting build: %v", err)
 		}
-		resp.Error.IsError = true
-		resp.Error.ErrorMsg = fmt.Sprintf("error getting build: %v", err)
 	}
 	return resp, nil
 }
@@ -239,7 +234,6 @@ var dpPattern = regexp.MustCompile(`^{"status":".+"progressDetail"`)
 
 func (gr *grpcserver) eventFromBytes(eb []byte) *BuildEvent {
 	event := &BuildEvent{
-		RpcError:   &RPCError{},
 		EventError: &BuildEventError{ErrorType: BuildEventError_NO_ERROR},
 	}
 	switch {
@@ -265,11 +259,11 @@ func (gr *grpcserver) eventsFromDL(stream FuranExecutor_MonitorBuildServer, buil
 			if err == io.EOF {
 				break
 			}
-			return fmt.Errorf("error reading stored build output stream: %v", err)
+			return grpc.Errorf(codes.Internal, "error reading stored build output stream: %v", err)
 		}
 		err = stream.Send(gr.eventFromBytes(line))
 		if err != nil {
-			return fmt.Errorf("error sending event: %v", err)
+			return grpc.Errorf(codes.Internal, "error sending event: %v", err)
 		}
 	}
 	return nil
@@ -305,23 +299,13 @@ func (gr *grpcserver) eventsFromEventBus(stream FuranExecutor_MonitorBuildServer
 }
 
 func (gr *grpcserver) MonitorBuild(req *BuildStatusRequest, stream FuranExecutor_MonitorBuildServer) error {
-	resp := &BuildEvent{
-		RpcError:   &RPCError{},
-		EventError: &BuildEventError{},
-	}
-	rpcError := func(errtype RPCError_ErrorType, msg string, params ...interface{}) error {
-		resp.RpcError.IsError = true
-		resp.RpcError.ErrorType = errtype
-		resp.RpcError.ErrorMsg = fmt.Sprintf(msg, params...)
-		return stream.Send(resp)
-	}
 	id, err := gocql.ParseUUID(req.BuildId)
 	if err != nil {
-		return rpcError(RPCError_BAD_REQUEST, "bad build id: %v", err)
+		return grpc.Errorf(codes.InvalidArgument, "bad build id: %v", err)
 	}
 	build, err := gr.dl.GetBuildByID(id)
 	if err != nil {
-		return rpcError(RPCError_INTERNAL_ERROR, "error getting build: %v", err)
+		return grpc.Errorf(codes.Internal, "error getting build: %v", err)
 	}
 	if build.Finished { // No need to use Kafka, just stream events from the data layer
 		return gr.eventsFromDL(stream, build)

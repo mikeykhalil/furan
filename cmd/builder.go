@@ -16,6 +16,7 @@ import (
 	"github.com/gocql/gocql"
 )
 
+//go:generate stringer -type=actionType
 type actionType int
 
 // Docker action types
@@ -64,10 +65,11 @@ type ImageBuilder struct {
 	gf CodeFetcher
 	ep EventBusProducer
 	dl DataLayer
+	ls io.Writer
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer) (*ImageBuilder, error) {
+func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer, logsink io.Writer) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	dc, err := docker.NewEnvClient()
 	ib.gf = NewGitHubFetcher(ghtoken)
@@ -77,6 +79,7 @@ func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLa
 	ib.c = dc
 	ib.ep = eventbus
 	ib.dl = datalayer
+	ib.ls = logsink
 	return ib, nil
 }
 
@@ -87,9 +90,9 @@ func (ib *ImageBuilder) log(ctx context.Context, msg string, params ...interface
 		return
 	}
 	msg = fmt.Sprintf("%v: %v", id.String(), msg)
-	log.Printf(msg, params...)
+	ib.ls.Write([]byte(fmt.Sprintf(msg, params...)))
 	go func() {
-		err := ib.ep.PublishEvent(id, fmt.Sprintf(msg, params...), BuildEvent_LOG, BuildEventError_NO_ERROR)
+		err := ib.ep.PublishEvent(id, fmt.Sprintf(msg, params...), BuildEvent_LOG, BuildEventError_NO_ERROR, false)
 		if err != nil {
 			log.Printf("error pushing event to bus: %v", err)
 		}
@@ -97,15 +100,15 @@ func (ib *ImageBuilder) log(ctx context.Context, msg string, params ...interface
 }
 
 func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
-	errtype BuildEventError_ErrorType, msg string) {
+	errtype BuildEventError_ErrorType, msg string, finished bool) {
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
 		log.Printf("build id missing from context")
 		return
 	}
-	log.Printf("%v: %v", id.String(), msg)
+	ib.ls.Write([]byte(fmt.Sprintf("%v: %v", id.String(), msg)))
 	go func() {
-		err := ib.ep.PublishEvent(id, msg, etype, errtype)
+		err := ib.ep.PublishEvent(id, msg, etype, errtype, finished)
 		if err != nil {
 			log.Printf("error pushing event to bus: %v", err)
 		}
@@ -298,8 +301,11 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 		} else {
 			errtype = BuildEventError_NO_ERROR
 		}
-		ib.event(ctx, buildEventTypeFromActionType(atype), errtype, string(line))
+		ib.event(ctx, buildEventTypeFromActionType(atype), errtype, string(line), false)
 		output = append(output, event)
+		if errtype == BuildEventError_FATAL {
+			return output, fmt.Errorf("fatal error performing %v action", atype.String())
+		}
 	}
 }
 

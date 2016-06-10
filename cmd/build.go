@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 
-	"github.com/dollarshaveclub/go-lib/httpreq"
-	"github.com/golang/protobuf/jsonpb"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
 )
 
 var cliBuildRequest = BuildRequest{
@@ -19,53 +18,113 @@ var cliBuildRequest = BuildRequest{
 	},
 }
 var tags string
-var remoteURL string
 var ghtoken string
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build and push a docker image from repo",
-	Long: `Build a Docker image from the specified git repository and push
-to the specified image repository.`,
+	Long: `Build a Docker image locally from the specified git repository and push
+to the specified image repository or S3 target.
+
+Set the following environment variables to allow access to your local Docker engine/daemon:
+
+DOCKER_HOST
+DOCKER_API_VERSION (optional)
+DOCKER_TLS_VERIFY
+DOCKER_CERT_PATH
+`,
 	Run: build,
 }
 
 func init() {
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.GithubRepo, "github-repo", "", "source github repo")
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref, "source-ref", "master", "source git ref")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.DockerfilePath, "dockerfile-path", "Dockerfile", "Dockerfile path (optional)")
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.Registry.Repo, "image-repo", "", "push to image repo")
-	buildCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (comma-delimited)")
-	buildCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA")
-	buildCmd.PersistentFlags().StringVar(&remoteURL, "remote-url", "", "Remote URL of Furan server (otherwise build locally)")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.S3.Region, "s3-region", "", "S3 region")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.S3.Bucket, "s3-bucket", "", "S3 bucket")
+	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.S3.KeyPrefix, "s3-key-prefix", "", "S3 key prefix")
+	buildCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (optional, comma-delimited)")
+	buildCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA (optional)")
 	RootCmd.AddCommand(buildCmd)
 }
 
-func build(cmd *cobra.Command, args []string) {
-	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
-	if remoteURL == "" {
-	} else {
-		remoteBuild()
-	}
+func clierr(msg string, params ...interface{}) {
+	fmt.Fprintf(os.Stderr, msg+"\n", params...)
+	os.Exit(1)
 }
 
-func remoteBuild() {
-	j, err := pbMarshaler.MarshalToString(&cliBuildRequest)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error marshaling request: %v\n", err)
-		os.Exit(1)
+func build(cmd *cobra.Command, args []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for _ = range c {
+			cancel()
+			os.Exit(1)
+			return
+		}
+	}()
+	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
+	if cliBuildRequest.Push.Registry.Repo == "" &&
+		cliBuildRequest.Push.S3.Region == "" &&
+		cliBuildRequest.Push.S3.Bucket == "" &&
+		cliBuildRequest.Push.S3.KeyPrefix == "" {
+		clierr("you must specify either a Docker registry or S3 region/bucket/key-prefix as a push target")
 	}
-	url := fmt.Sprintf("%v/build", remoteURL)
-	headers := map[string]string{"Content-Type": "application/json"}
-	r, err := httpreq.HTTPRequest(url, "POST", bytes.NewBuffer([]byte(j)), headers, true)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error triggering remote build: %v\n", err)
-		os.Exit(1)
+	if cliBuildRequest.Build.GithubRepo == "" {
+		clierr("GitHub repo is required")
 	}
-	resp := BuildRequestResponse{}
-	err = jsonpb.Unmarshal(bytes.NewBuffer(r.BodyBytes), &resp)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error unmarshaling response: %v\n", err)
-		os.Exit(1)
+	if cliBuildRequest.Build.Ref == "" {
+		clierr("Source ref is required")
 	}
-	fmt.Printf("build_id: %v\n", resp.BuildId)
+
+	setupVault()
+	setupDB(initializeDB)
+	setupKafka()
+	err := getDockercfg()
+	if err != nil {
+		clierr("Error getting dockercfg: %v", err)
+	}
+
+	dnull, err := os.Open(os.DevNull)
+	if err != nil {
+		clierr("error opening %v: %v", os.DevNull, err)
+	}
+	defer dnull.Close()
+
+	ib, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, dnull)
+	if err != nil {
+		clierr("error creating image builder: %v", err)
+	}
+
+	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, dnull)
+
+	workerChan = make(chan *workerRequest)
+	go func() {
+		var wreq *workerRequest
+		for {
+			wreq = <-workerChan
+			if !isCancelled(wreq.ctx.Done()) {
+				gs.syncBuild(wreq.ctx, wreq.req)
+			}
+		}
+	}()
+
+	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
+	if err != nil {
+		clierr("error running build: %v", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "build id: %v\n", resp.BuildId)
+
+	req := &BuildStatusRequest{
+		BuildId: resp.BuildId,
+	}
+
+	ls := NewLocalServerStream(ctx, os.Stdout)
+	err = gs.MonitorBuild(req, ls)
+	if err != nil {
+		clierr("error monitoring build: %v", err)
+	}
 }

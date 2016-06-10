@@ -9,17 +9,6 @@ service FuranExecutor {
   rpc CancelBuild (BuildCancelRequest) returns (BuildStatusResponse) {}
 }
 
-message RPCError {
-  enum ErrorType {
-    INTERNAL_ERROR = 0;
-    BAD_REQUEST = 1;
-    UNKNOWN = 2;
-  }
-  bool is_error = 1;
-  string error_msg = 2;
-  ErrorType error_type = 3;
-}
-
 message BuildDefinition {
   string github_repo = 1;
   string dockerfile_path = 2;
@@ -61,30 +50,29 @@ message BuildCancelRequest {
 // Responses
 
 message BuildRequestResponse {
-  RPCError error = 1;
   string build_id = 2;
 }
 
 message BuildStatusResponse {
-  RPCError error = 1;
   enum BuildState {
-    BUILDING = 0;
-    PUSHING = 1;
-    SUCCESS = 2;
-    BUILD_FAILURE = 3;
-    PUSH_FAILURE = 4;
+    STARTED = 0;
+    BUILDING = 1;
+    PUSHING = 2;
+    SUCCESS = 3;
+    BUILD_FAILURE = 4;
+    PUSH_FAILURE = 5;
   }
-  string build_id = 2;
-  BuildRequest build_request = 3;
-  BuildState state = 4;
-  bytes build_output = 5;
-  bytes push_output = 6;
-  bool finished = 7;
-  bool failed = 8;
-  bool cancelled = 9;
-  string started = 10;
-  string completed = 11;
-  double duration = 12;
+  string build_id = 1;
+  BuildRequest build_request = 2;
+  BuildState state = 3;
+  bytes build_output = 4;
+  bytes push_output = 5;
+  bool finished = 6;
+  bool failed = 7;
+  bool cancelled = 8;
+  string started = 9;
+  string completed = 10;
+  double duration = 11;
 }
 
 // Messages server-streamed and/or published to Kafka
@@ -105,10 +93,9 @@ message BuildEvent {
     DOCKER_PUSH_STREAM = 1;
     LOG = 2;
   }
-  RPCError rpc_error = 1;
-  BuildEventError event_error = 2;
-  EventType event_type = 3;
-  string build_id = 4;
-  string message = 5;
-  bool build_finished = 6;
+  BuildEventError event_error = 1;
+  EventType event_type = 2;
+  string build_id = 3;
+  string message = 4;
+  bool build_finished = 5;
 }

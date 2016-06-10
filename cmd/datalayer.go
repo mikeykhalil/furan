@@ -44,7 +44,7 @@ func (dl *DBLayer) CreateBuild(req *BuildRequest) (gocql.UUID, error) {
 	udt := udtFromBuildRequest(req)
 	err = dl.s.Query(q, id, udt.GithubRepo, udt.DockerfilePath, udt.Tags, udt.TagWithCommitSha, udt.Ref,
 		udt.PushRegistryRepo, udt.PushS3Region, udt.PushS3Bucket, udt.PushS3KeyPrefix,
-		"started", false, false, false, time.Now()).Exec()
+		BuildStatusResponse_STARTED.String(), false, false, false, time.Now()).Exec()
 	if err != nil {
 		return id, err
 	}
@@ -61,7 +61,6 @@ func (dl *DBLayer) GetBuildByID(id gocql.UUID) (*BuildStatusResponse, error) {
 	var started, completed time.Time
 	bi := &BuildStatusResponse{
 		BuildId: id.String(),
-		Error:   &RPCError{},
 	}
 	err := dl.s.Query(q, id).Scan(&udt.GithubRepo, &udt.DockerfilePath, &udt.Tags,
 		&udt.TagWithCommitSha, &udt.Ref, &udt.PushRegistryRepo, &udt.PushS3Region,

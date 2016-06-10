@@ -6,6 +6,9 @@ import (
 	"io"
 	"net/http"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
@@ -39,14 +42,16 @@ func unmarshalRequest(r io.Reader) (*BuildRequest, error) {
 	return &req, nil
 }
 
-func handleRPCError(w http.ResponseWriter, rpcerr *RPCError) {
-	switch rpcerr.ErrorType {
-	case RPCError_BAD_REQUEST:
-		badRequestError(w, fmt.Errorf(rpcerr.ErrorMsg))
+func handleRPCError(w http.ResponseWriter, err error) {
+	code := grpc.Code(err)
+	switch code {
+	case codes.InvalidArgument:
+		badRequestError(w, err)
+	case codes.Internal:
+		internalError(w, err)
 	default:
-		internalError(w, fmt.Errorf(rpcerr.ErrorMsg))
+		internalError(w, err)
 	}
-	return
 }
 
 // REST interface handlers (proxy to gRPC handlers)
@@ -58,11 +63,7 @@ func buildRequestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := grpcServer.StartBuild(context.TODO(), req)
 	if err != nil {
-		internalError(w, err)
-		return
-	}
-	if resp.Error.IsError {
-		handleRPCError(w, resp.Error)
+		handleRPCError(w, err)
 		return
 	}
 	httpSuccess(w, resp)
@@ -75,11 +76,7 @@ func buildStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := grpcServer.GetBuildStatus(context.TODO(), &req)
 	if err != nil {
-		internalError(w, err)
-		return
-	}
-	if resp.Error.IsError {
-		handleRPCError(w, resp.Error)
+		handleRPCError(w, err)
 		return
 	}
 	resp.BuildOutput = []byte{}
@@ -96,7 +93,7 @@ func buildCancelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := grpcServer.CancelBuild(context.TODO(), &req)
 	if err != nil {
-		internalError(w, err)
+		handleRPCError(w, err)
 		return
 	}
 	httpSuccess(w, resp)

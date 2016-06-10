@@ -12,6 +12,13 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
+type kafkaconfig struct {
+	brokers      []string
+	topic        string
+	manager      EventBusManager
+	maxOpenSends uint
+}
+
 func setupKafka() {
 	kafkaConfig.brokers = strings.Split(kafkaBrokerStr, ",")
 	if len(kafkaConfig.brokers) < 1 {
@@ -29,7 +36,7 @@ func setupKafka() {
 
 // EventBusProducer describes an object capable of publishing events somewhere
 type EventBusProducer interface {
-	PublishEvent(gocql.UUID, string, BuildEvent_EventType, BuildEventError_ErrorType) error
+	PublishEvent(gocql.UUID, string, BuildEvent_EventType, BuildEventError_ErrorType, bool) error
 }
 
 // EventBusConsumer describes an object cabable of subscribing to events somewhere
@@ -81,16 +88,17 @@ func (kp *KafkaManager) handleErrors() {
 }
 
 // PublishEvent publishes a build event to the configured Kafka topic
-func (kp *KafkaManager) PublishEvent(id gocql.UUID, msg string, etype BuildEvent_EventType, errtype BuildEventError_ErrorType) error {
+func (kp *KafkaManager) PublishEvent(id gocql.UUID, msg string, etype BuildEvent_EventType, errtype BuildEventError_ErrorType, finished bool) error {
 	berr := &BuildEventError{
 		ErrorType: errtype,
 	}
 	berr.IsError = errtype != BuildEventError_NO_ERROR
 	event := BuildEvent{
-		EventType:  etype,
-		EventError: berr,
-		BuildId:    id.String(),
-		Message:    msg,
+		EventType:     etype,
+		EventError:    berr,
+		BuildId:       id.String(),
+		Message:       msg,
+		BuildFinished: finished,
 	}
 	val, err := proto.Marshal(&event)
 	if err != nil {
@@ -160,7 +168,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *BuildEvent, done <-chan 
 					continue
 				}
 				output <- event
-				if event.BuildFinished {
+				if event.BuildFinished || event.EventError.IsError {
 					return
 				}
 			}
