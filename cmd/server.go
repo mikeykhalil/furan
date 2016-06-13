@@ -31,7 +31,7 @@ type serverconfig struct {
 var serverConfig serverconfig
 var kafkaConfig kafkaconfig
 
-var logger *StandardLogger
+var logger *log.Logger
 
 var version = "0"
 var description = "unknown"
@@ -63,8 +63,12 @@ func setupServerLogger() {
 	if serverConfig.logToSumo {
 		url = serverConfig.sumoURL
 	}
-	logger = NewStandardLogger(os.Stdout, url)
-	log.SetOutput(logger)
+	hn, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("error getting hostname: %v", err)
+	}
+	stdlog := NewStandardLogger(os.Stderr, url)
+	logger = log.New(stdlog, fmt.Sprintf("%v: ", hn), log.LstdFlags)
 }
 
 // Separate server because it's HTTP on localhost only
@@ -74,8 +78,8 @@ func healthcheck() {
 	r.HandleFunc("/health", healthHandler).Methods("GET")
 	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.healthcheckHTTPport)
 	server := &http.Server{Addr: addr, Handler: r}
-	log.Printf("HTTP healthcheck listening on: %v", addr)
-	log.Println(server.ListenAndServe())
+	logger.Printf("HTTP healthcheck listening on: %v", addr)
+	logger.Println(server.ListenAndServe())
 }
 
 func server(cmd *cobra.Command, args []string) {
@@ -90,7 +94,7 @@ func server(cmd *cobra.Command, args []string) {
 	defer rmTempFiles(certPath, keyPath)
 	err := getDockercfg()
 	if err != nil {
-		log.Fatalf("error reading dockercfg: %v", err)
+		logger.Fatalf("error reading dockercfg: %v", err)
 	}
 
 	startgRPC()
@@ -105,8 +109,8 @@ func server(cmd *cobra.Command, args []string) {
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	addr := fmt.Sprintf("%v:%v", serverConfig.httpsAddr, serverConfig.httpsPort)
 	server := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsconfig}
-	log.Printf("HTTPS REST listening on: %v", addr)
-	log.Println(server.ListenAndServeTLS(certPath, keyPath))
+	logger.Printf("HTTPS REST listening on: %v", addr)
+	logger.Println(server.ListenAndServeTLS(certPath, keyPath))
 }
 
 func setupVersion() {
@@ -132,12 +136,4 @@ func setupVersion() {
 	}
 	version = string(bv[:sv])
 	description = string(bd[:sd])
-}
-
-func runWorkers() {
-	workerChan = make(chan *workerRequest, serverConfig.queuesize)
-	for i := 0; uint(i) < serverConfig.concurrency; i++ {
-		go buildWorker()
-	}
-	log.Printf("%v workers running (queue: %v)", serverConfig.concurrency, serverConfig.queuesize)
 }

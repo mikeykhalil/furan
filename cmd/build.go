@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -9,16 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 )
-
-var cliBuildRequest = BuildRequest{
-	Build: &BuildDefinition{},
-	Push: &PushDefinition{
-		Registry: &PushRegistryDefinition{},
-		S3:       &PushS3Definition{},
-	},
-}
-var tags string
-var ghtoken string
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
@@ -54,17 +45,7 @@ func clierr(msg string, params ...interface{}) {
 	os.Exit(1)
 }
 
-func build(cmd *cobra.Command, args []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	go func() {
-		for _ = range c {
-			cancel()
-			os.Exit(1)
-			return
-		}
-	}()
+func validateCLIBuildRequest() {
 	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
 	if cliBuildRequest.Push.Registry.Repo == "" &&
 		cliBuildRequest.Push.S3.Region == "" &&
@@ -78,7 +59,21 @@ func build(cmd *cobra.Command, args []string) {
 	if cliBuildRequest.Build.Ref == "" {
 		clierr("Source ref is required")
 	}
+}
 
+func build(cmd *cobra.Command, args []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for _ = range c {
+			cancel()
+			os.Exit(1)
+			return
+		}
+	}()
+
+	validateCLIBuildRequest()
 	setupVault()
 	setupDB(initializeDB)
 	setupKafka()
@@ -98,7 +93,9 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("error creating image builder: %v", err)
 	}
 
-	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, dnull)
+	logger = log.New(dnull, "", log.LstdFlags)
+
+	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, logger)
 
 	workerChan = make(chan *workerRequest)
 	go func() {

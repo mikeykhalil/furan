@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"os"
 )
 
 // StandardLogger represents a log function that can optionally send messages
@@ -16,23 +14,17 @@ type StandardLogger struct {
 	sumoURL   string
 	sink      io.Writer
 	hc        http.Client
-	hostname  string
 }
 
 // NewStandardLogger returns a StandardLogger object
 // If sumoURL is not an empty string log entries will be send to SumoLogic as
 // well as the sink
 func NewStandardLogger(sink io.Writer, sumoURL string) *StandardLogger {
-	hn, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("error getting hostname: %v", err)
-	}
 	return &StandardLogger{
 		logToSumo: sumoURL != "",
 		sumoURL:   sumoURL,
 		sink:      sink,
 		hc:        http.Client{},
-		hostname:  hn,
 	}
 }
 
@@ -47,7 +39,6 @@ func (sl *StandardLogger) Write(data []byte) (int, error) {
 
 func (sl *StandardLogger) _sumo(data []byte) {
 	body := bytes.NewBuffer(nil)
-	body.Write([]byte(fmt.Sprintf("%v ", sl.hostname)))
 	body.Write(data)
 	req, err := http.NewRequest("POST", sl.sumoURL, body)
 	if err != nil {

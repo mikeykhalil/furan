@@ -61,7 +61,7 @@ func buildRequestHandler(w http.ResponseWriter, r *http.Request) {
 		badRequestError(w, err)
 		return
 	}
-	resp, err := grpcServer.StartBuild(context.TODO(), req)
+	resp, err := grpcSvr.StartBuild(context.Background(), req)
 	if err != nil {
 		handleRPCError(w, err)
 		return
@@ -74,7 +74,7 @@ func buildStatusHandler(w http.ResponseWriter, r *http.Request) {
 	req := BuildStatusRequest{
 		BuildId: id,
 	}
-	resp, err := grpcServer.GetBuildStatus(context.TODO(), &req)
+	resp, err := grpcSvr.GetBuildStatus(context.Background(), &req)
 	if err != nil {
 		handleRPCError(w, err)
 		return
@@ -91,7 +91,7 @@ func buildCancelHandler(w http.ResponseWriter, r *http.Request) {
 		badRequestError(w, err)
 		return
 	}
-	resp, err := grpcServer.CancelBuild(context.TODO(), &req)
+	resp, err := grpcSvr.CancelBuild(context.Background(), &req)
 	if err != nil {
 		handleRPCError(w, err)
 		return

@@ -27,7 +27,7 @@ func setupKafka() {
 	if kafkaConfig.topic == "" {
 		log.Fatalf("Kafka topic is required")
 	}
-	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends)
+	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends, logger)
 	if err != nil {
 		log.Fatalf("Error creating Kafka producer: %v", err)
 	}
@@ -56,10 +56,11 @@ type KafkaManager struct {
 	topic        string
 	brokers      []string
 	consumerConf *cluster.Config
+	logger       *log.Logger
 }
 
 // NewKafkaManager returns a new Kafka manager object
-func NewKafkaManager(brokers []string, topic string, maxsends uint) (*KafkaManager, error) {
+func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.Logger) (*KafkaManager, error) {
 	pconf := sarama.NewConfig()
 	pconf.Net.MaxOpenRequests = int(maxsends)
 	pconf.Producer.Return.Errors = true
@@ -74,6 +75,7 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint) (*KafkaManag
 		topic:        topic,
 		brokers:      kafkaConfig.brokers,
 		consumerConf: cconf,
+		logger:       logger,
 	}
 	go kp.handleErrors()
 	return kp, nil
@@ -137,7 +139,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *BuildEvent, done <-chan 
 			if err == nil { // chan closed
 				return
 			}
-			log.Printf("kafka consumer error: %v", err)
+			kp.logger.Printf("kafka consumer error: %v", err)
 		}
 	}
 	go handleConsumerErrors()
@@ -151,7 +153,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *BuildEvent, done <-chan 
 		for {
 			select {
 			case <-done:
-				log.Printf("SubscribeToTopic: aborting")
+				kp.logger.Printf("SubscribeToTopic: aborting")
 				return
 			default:
 				break
@@ -164,7 +166,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *BuildEvent, done <-chan 
 				event = &BuildEvent{}
 				err = proto.Unmarshal(msg.Value, event)
 				if err != nil {
-					log.Printf("%v: error unmarshaling event from Kafka stream: %v", buildID.String(), err)
+					kp.logger.Printf("%v: error unmarshaling event from Kafka stream: %v", buildID.String(), err)
 					continue
 				}
 				output <- event

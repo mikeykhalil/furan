@@ -40,6 +40,16 @@ var datacenterstr string
 var initializeDB bool
 var kafkaBrokerStr string
 
+// used by build and trigger commands
+var cliBuildRequest = BuildRequest{
+	Build: &BuildDefinition{},
+	Push: &PushDefinition{
+		Registry: &PushRegistryDefinition{},
+		S3:       &PushS3Definition{},
+	},
+}
+var tags string
+
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "furan",
