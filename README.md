@@ -78,10 +78,10 @@ Possible states:
   - pushFailure
 
 
-GET ``/health``
+GET ``http://localhost:{healthcheck port}/health``
 ---------------
 
-Healthcheck.
+Healthcheck. Listens on localhost only.
 
 Response:
 

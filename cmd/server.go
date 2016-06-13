@@ -12,19 +12,20 @@ import (
 )
 
 type serverconfig struct {
-	httpsPort        uint
-	grpcPort         uint
-	httpsAddr        string
-	grpcAddr         string
-	concurrency      uint
-	queuesize        uint
-	vaultTLSCertPath string
-	vaultTLSKeyPath  string
-	tlsCert          []byte
-	tlsKey           []byte
-	logToSumo        bool
-	sumoURL          string
-	vaultSumoURLPath string
+	httpsPort           uint
+	grpcPort            uint
+	httpsAddr           string
+	grpcAddr            string
+	concurrency         uint
+	queuesize           uint
+	vaultTLSCertPath    string
+	vaultTLSKeyPath     string
+	tlsCert             []byte
+	tlsKey              []byte
+	logToSumo           bool
+	sumoURL             string
+	vaultSumoURLPath    string
+	healthcheckHTTPport uint
 }
 
 var serverConfig serverconfig
@@ -45,6 +46,7 @@ var serverCmd = &cobra.Command{
 func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.httpsPort, "https-port", 4000, "REST HTTPS TCP port")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.grpcPort, "grpc-port", 4001, "gRPC TCP port")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.healthcheckHTTPport, "healthcheck-port", 4002, "Healthcheck HTTP port (listens on localhost only)")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.httpsAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.grpcAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.concurrency, "concurrency", 10, "Max concurrent builds")
@@ -65,6 +67,17 @@ func setupServerLogger() {
 	log.SetOutput(logger)
 }
 
+// Separate server because it's HTTP on localhost only
+// (simplifies Consul health check)
+func healthcheck() {
+	r := mux.NewRouter()
+	r.HandleFunc("/health", healthHandler).Methods("GET")
+	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.healthcheckHTTPport)
+	server := &http.Server{Addr: addr, Handler: r}
+	log.Printf("HTTP healthcheck listening on: %v", addr)
+	log.Println(server.ListenAndServe())
+}
+
 func server(cmd *cobra.Command, args []string) {
 	setupVault()
 	if serverConfig.logToSumo {
@@ -81,13 +94,13 @@ func server(cmd *cobra.Command, args []string) {
 	}
 
 	startgRPC()
+	go healthcheck()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
 	r.HandleFunc("/build", buildRequestHandler).Methods("POST")
 	r.HandleFunc("/build/{id}", buildStatusHandler).Methods("GET")
 	r.HandleFunc("/build/{id}", buildCancelHandler).Methods("DELETE")
-	r.HandleFunc("/health", healthHandler).Methods("GET")
 
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	addr := fmt.Sprintf("%v:%v", serverConfig.httpsAddr, serverConfig.httpsPort)
