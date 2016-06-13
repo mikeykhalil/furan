@@ -21,5 +21,7 @@ go get -v
 go build || exit 1
 go install
 
+rm -rf /go/src/*
+
 apk del git
 rm -rf /var/cache/apk/*
