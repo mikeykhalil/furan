@@ -42,6 +42,7 @@ func vaultPath(path string) string {
 	return fmt.Sprintf("%v%v", vaultConfig.vaultPathPrefix, path)
 }
 
+// Generic Vault setup (all subcommands)
 func setupVault() {
 	vc, err := getVaultClient()
 	if err != nil {
@@ -57,6 +58,18 @@ func setupVault() {
 	}
 	gitConfig.token = safeStringCast(ght)
 	dockerConfig.dockercfgRaw = safeStringCast(dcc)
+}
+
+func getSumoURL() {
+	vc, err := getVaultClient()
+	if err != nil {
+		log.Fatalf("Error creating Vault client; %v", err)
+	}
+	scu, err := vc.GetValue(vaultPath(serverConfig.vaultSumoURLPath))
+	if err != nil {
+		log.Fatalf("Error getting SumoLogic collector URL: %v", err)
+	}
+	serverConfig.sumoURL = safeStringCast(scu)
 }
 
 // TLS cert/key are retrieved from Vault and must be written to temp files

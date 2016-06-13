@@ -71,8 +71,8 @@ type ImageBuilder struct {
 // NewImageBuilder returns a new ImageBuilder
 func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer, logsink io.Writer) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
-	dc, err := docker.NewEnvClient()
 	ib.gf = NewGitHubFetcher(ghtoken)
+	dc, err := docker.NewEnvClient()
 	if err != nil {
 		return ib, err
 	}

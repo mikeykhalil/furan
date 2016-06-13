@@ -22,10 +22,15 @@ type serverconfig struct {
 	vaultTLSKeyPath  string
 	tlsCert          []byte
 	tlsKey           []byte
+	logToSumo        bool
+	sumoURL          string
+	vaultSumoURLPath string
 }
 
 var serverConfig serverconfig
 var kafkaConfig kafkaconfig
+
+var logger *StandardLogger
 
 var version = "0"
 var description = "unknown"
@@ -46,11 +51,26 @@ func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.queuesize, "queue", 100, "Max queue size for buffered build requests")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSCertPath, "tls-cert-path", "/tls/cert", "Vault path to TLS certificate")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
+	serverCmd.PersistentFlags().BoolVar(&serverConfig.logToSumo, "log-to-sumo", true, "Send log entries to SumoLogic HTTPS collector")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultSumoURLPath, "sumo-collector-path", "/sumologic/url", "Vault path SumoLogic collector URL")
 	RootCmd.AddCommand(serverCmd)
+}
+
+func setupServerLogger() {
+	var url string
+	if serverConfig.logToSumo {
+		url = serverConfig.sumoURL
+	}
+	logger = NewStandardLogger(os.Stdout, url)
+	log.SetOutput(logger)
 }
 
 func server(cmd *cobra.Command, args []string) {
 	setupVault()
+	if serverConfig.logToSumo {
+		getSumoURL()
+	}
+	setupServerLogger()
 	setupDB(initializeDB)
 	setupKafka()
 	certPath, keyPath := writeTLSCert()
