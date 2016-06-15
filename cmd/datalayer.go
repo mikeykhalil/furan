@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/golang/protobuf/proto"
 )
 
 // DataLayer describes an object that interacts with the persistant data store
@@ -14,11 +15,11 @@ type DataLayer interface {
 	SetBuildFlags(gocql.UUID, map[string]bool) error
 	SetBuildCompletedTimestamp(gocql.UUID) error
 	SetBuildState(gocql.UUID, BuildStatusResponse_BuildState) error
-	SetBuildImageBuildOutput(gocql.UUID, []byte) error
-	SetBuildPushOutput(gocql.UUID, []byte) error
 	DeleteBuild(gocql.UUID) error
 	SetBuildTimeMetric(gocql.UUID, string) error
 	SetDockerImageSizesMetric(gocql.UUID, int64, int64) error
+	SaveBuildOutput(gocql.UUID, []BuildEvent, string) error
+	GetBuildOutput(gocql.UUID, string) ([]BuildEvent, error)
 }
 
 // DBLayer is an DataLayer instance that interacts with the Cassandra database
@@ -54,8 +55,8 @@ func (dl *DBLayer) CreateBuild(req *BuildRequest) (gocql.UUID, error) {
 
 // GetBuildByID fetches a build object from the DB
 func (dl *DBLayer) GetBuildByID(id gocql.UUID) (*BuildStatusResponse, error) {
-	q := `SELECT request, state, build_output, push_output, finished, failed, cancelled,
-        started, completed, duration FROM builds_by_id WHERE id = ?;`
+	q := `SELECT request, state, finished, failed, cancelled, started, completed,
+	      duration FROM builds_by_id WHERE id = ?;`
 	var udt buildRequestUDT
 	var state string
 	var started, completed time.Time
@@ -64,9 +65,8 @@ func (dl *DBLayer) GetBuildByID(id gocql.UUID) (*BuildStatusResponse, error) {
 	}
 	err := dl.s.Query(q, id).Scan(&udt.GithubRepo, &udt.DockerfilePath, &udt.Tags,
 		&udt.TagWithCommitSha, &udt.Ref, &udt.PushRegistryRepo, &udt.PushS3Region,
-		&udt.PushS3KeyPrefix, &udt.PushS3KeyPrefix, &state, &bi.BuildOutput,
-		&bi.PushOutput, &bi.Finished, &bi.Failed, &bi.Cancelled, &started,
-		&completed, &bi.Duration)
+		&udt.PushS3KeyPrefix, &udt.PushS3KeyPrefix, &state, &bi.Finished, &bi.Failed,
+		&bi.Cancelled, &started, &completed, &bi.Duration)
 	if err != nil {
 		return bi, err
 	}
@@ -109,18 +109,6 @@ func (dl *DBLayer) SetBuildCompletedTimestamp(id gocql.UUID) error {
 func (dl *DBLayer) SetBuildState(id gocql.UUID, state BuildStatusResponse_BuildState) error {
 	q := `UPDATE builds_by_id SET state = ? WHERE id = ?;`
 	return dl.s.Query(q, state.String(), id).Exec()
-}
-
-// SetBuildImageBuildOutput writes the image build output to the database
-func (dl *DBLayer) SetBuildImageBuildOutput(id gocql.UUID, output []byte) error {
-	q := `UPDATE builds_by_id SET build_output = ? WHERE id = ?;`
-	return dl.s.Query(q, string(output), id).Exec()
-}
-
-// SetBuildPushOutput writes the image push output to the database
-func (dl *DBLayer) SetBuildPushOutput(id gocql.UUID, output []byte) error {
-	q := `UPDATE builds_by_id SET push_output = ? WHERE id = ?;`
-	return dl.s.Query(q, string(output), id).Exec()
 }
 
 // DeleteBuild removes a build from the DB.
@@ -175,4 +163,28 @@ func (dl *DBLayer) SetBuildTimeMetric(id gocql.UUID, metric string) error {
 func (dl *DBLayer) SetDockerImageSizesMetric(id gocql.UUID, size int64, vsize int64) error {
 	q := `UPDATE build_metrics_by_id SET docker_image_size = ?, docker_image_vsize = ? WHERE id = ?;`
 	return dl.s.Query(q, size, vsize, id).Exec()
+}
+
+// SaveBuildOutput serializes an array of stream events to the database
+func (dl *DBLayer) SaveBuildOutput(id gocql.UUID, output []BuildEvent, column string) error {
+	serialized := make([][]byte, len(output))
+	var err error
+	var b []byte
+	for i, e := range output {
+		b, err = proto.Marshal(&e)
+		if err != nil {
+			return err
+		}
+		serialized[i] = b
+	}
+	q := `INSERT INTO build_events_by_id SET %v = ? WHERE id = ?;`
+	return dl.s.Query(fmt.Sprintf(q, column), serialized, id.String()).Exec()
+}
+
+// GetBuildOutput returns an array of stream events from the database
+func (dl *DBLayer) GetBuildOutput(id gocql.UUID, column string) ([]BuildEvent, error) {
+	var output []BuildEvent
+	q := `SELECT %v FROM build_events_by_id WHERE id = ?;`
+	err := dl.s.Query(fmt.Sprintf(q, column), id).Scan(&output)
+	return output, err
 }

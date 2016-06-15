@@ -65,14 +65,12 @@ message BuildStatusResponse {
   string build_id = 1;
   BuildRequest build_request = 2;
   BuildState state = 3;
-  bytes build_output = 4;
-  bytes push_output = 5;
-  bool finished = 6;
-  bool failed = 7;
-  bool cancelled = 8;
-  string started = 9;
-  string completed = 10;
-  double duration = 11;
+  bool finished = 4;
+  bool failed = 5;
+  bool cancelled = 6;
+  string started = 7;
+  string completed = 8;
+  double duration = 9;
 }
 
 // Messages server-streamed and/or published to Kafka

@@ -36,7 +36,7 @@ func setupKafka() {
 
 // EventBusProducer describes an object capable of publishing events somewhere
 type EventBusProducer interface {
-	PublishEvent(gocql.UUID, string, BuildEvent_EventType, BuildEventError_ErrorType, bool) error
+	PublishEvent(*BuildEvent) error
 }
 
 // EventBusConsumer describes an object cabable of subscribing to events somewhere
@@ -90,19 +90,12 @@ func (kp *KafkaManager) handleErrors() {
 }
 
 // PublishEvent publishes a build event to the configured Kafka topic
-func (kp *KafkaManager) PublishEvent(id gocql.UUID, msg string, etype BuildEvent_EventType, errtype BuildEventError_ErrorType, finished bool) error {
-	berr := &BuildEventError{
-		ErrorType: errtype,
+func (kp *KafkaManager) PublishEvent(event *BuildEvent) error {
+	id, err := gocql.ParseUUID(event.BuildId)
+	if err != nil {
+		return err
 	}
-	berr.IsError = errtype != BuildEventError_NO_ERROR
-	event := BuildEvent{
-		EventType:     etype,
-		EventError:    berr,
-		BuildId:       id.String(),
-		Message:       msg,
-		BuildFinished: finished,
-	}
-	val, err := proto.Marshal(&event)
+	val, err := proto.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshaling protobuf: %v", err)
 	}

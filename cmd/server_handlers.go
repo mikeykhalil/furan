@@ -79,8 +79,6 @@ func buildStatusHandler(w http.ResponseWriter, r *http.Request) {
 		handleRPCError(w, err)
 		return
 	}
-	resp.BuildOutput = []byte{}
-	resp.PushOutput = []byte{}
 	httpSuccess(w, resp)
 }
 
@@ -124,7 +122,7 @@ func httpError(w http.ResponseWriter, code int, err error) {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	if cap(workerChan) > 0 {
+	if cap(grpcSvr.workerChan) > 0 {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusTooManyRequests)

@@ -82,6 +82,16 @@ func healthcheck() {
 	logger.Println(server.ListenAndServe())
 }
 
+func startgRPC() {
+	imageBuilder, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, logger)
+	if err != nil {
+		log.Fatalf("error creating image builder: %v", err)
+	}
+
+	grpcSvr = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, serverConfig.queuesize, serverConfig.concurrency, logger)
+	go grpcSvr.ListenRPC(serverConfig.grpcAddr, serverConfig.grpcPort)
+}
+
 func server(cmd *cobra.Command, args []string) {
 	setupVault()
 	if serverConfig.logToSumo {

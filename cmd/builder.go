@@ -61,15 +61,15 @@ type ImageBuildPusher interface {
 
 // ImageBuilder is an object that builds and pushes images
 type ImageBuilder struct {
-	c  ImageBuildClient
-	gf CodeFetcher
-	ep EventBusProducer
-	dl DataLayer
-	ls io.Writer
+	c      ImageBuildClient
+	gf     CodeFetcher
+	ep     EventBusProducer
+	dl     DataLayer
+	logger *log.Logger
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer, logsink io.Writer) (*ImageBuilder, error) {
+func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer, logger *log.Logger) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	ib.gf = NewGitHubFetcher(ghtoken)
 	dc, err := docker.NewEnvClient()
@@ -79,40 +79,64 @@ func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLa
 	ib.c = dc
 	ib.ep = eventbus
 	ib.dl = datalayer
-	ib.ls = logsink
+	ib.logger = logger
 	return ib, nil
 }
 
-func (ib *ImageBuilder) log(ctx context.Context, msg string, params ...interface{}) {
+func (ib *ImageBuilder) logf(ctx context.Context, msg string, params ...interface{}) {
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
 		log.Printf("build id missing from context")
 		return
 	}
 	msg = fmt.Sprintf("%v: %v", id.String(), msg)
-	ib.ls.Write([]byte(fmt.Sprintf(msg, params...)))
+	ib.logger.Printf(msg, params...)
 	go func() {
-		err := ib.ep.PublishEvent(id, fmt.Sprintf(msg, params...), BuildEvent_LOG, BuildEventError_NO_ERROR, false)
+		event, err := ib.getBuildEvent(ctx, BuildEvent_LOG, BuildEventError_NO_ERROR, fmt.Sprintf(msg, params...), false)
+		if err != nil {
+			log.Printf("error building event object: %v", err)
+			return
+		}
+		err = ib.ep.PublishEvent(event)
 		if err != nil {
 			log.Printf("error pushing event to bus: %v", err)
 		}
 	}()
 }
 
-func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
-	errtype BuildEventError_ErrorType, msg string, finished bool) {
+func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype BuildEvent_EventType,
+	errtype BuildEventError_ErrorType, msg string, finished bool) (*BuildEvent, error) {
+	var event *BuildEvent
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
-		log.Printf("build id missing from context")
-		return
+		return event, fmt.Errorf("build id missing from context")
 	}
-	ib.ls.Write([]byte(fmt.Sprintf("%v: %v", id.String(), msg)))
+	event = &BuildEvent{
+		EventError: &BuildEventError{
+			ErrorType: errtype,
+			IsError:   errtype != BuildEventError_NO_ERROR,
+		},
+		BuildId:       id.String(),
+		EventType:     etype,
+		BuildFinished: finished,
+		Message:       msg,
+	}
+	return event, nil
+}
+
+func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
+	errtype BuildEventError_ErrorType, msg string, finished bool) (*BuildEvent, error) {
+	event, err := ib.getBuildEvent(ctx, etype, errtype, msg, finished)
+	if err != nil {
+		return event, err
+	}
 	go func() {
-		err := ib.ep.PublishEvent(id, msg, etype, errtype, finished)
+		err := ib.ep.PublishEvent(event)
 		if err != nil {
 			log.Printf("error pushing event to bus: %v", err)
 		}
 	}()
+	return event, nil
 }
 
 // Returns full docker name:tag strings from the supplied repo/tags
@@ -132,7 +156,7 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 
 // Build builds an image accourding to the request
 func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) (string, error) {
-	ib.log(ctx, "starting build")
+	ib.logf(ctx, "starting build")
 	err := ib.dl.SetBuildTimeMetric(id, "docker_build_started")
 	if err != nil {
 		return "", err
@@ -146,7 +170,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	if isCancelled(ctx.Done()) {
 		return "", fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
-	ib.log(ctx, "fetching github repo: %v", req.Build.GithubRepo)
+	ib.logf(ctx, "fetching github repo: %v", req.Build.GithubRepo)
 	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
 	if err != nil {
 		return "", err
@@ -165,31 +189,24 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	return ib.dobuild(ctx, req, rbi)
 }
 
-func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, events []dockerStreamEvent) error {
+func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, events []BuildEvent) error {
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("build was cancelled: %v", ctx.Err())
-	}
-	output := []byte{}
-	for _, e := range events {
-		j, err := json.Marshal(&e)
-		if err != nil {
-			return fmt.Errorf("error marshaling dockerStreamEvent: %v", err)
-		}
-		j = append(j, byte('\n'))
-		output = append(output, j...)
 	}
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
+	var column string
 	switch action {
 	case Build:
-		return ib.dl.SetBuildImageBuildOutput(id, output)
+		column = "build_output"
 	case Push:
-		return ib.dl.SetBuildPushOutput(id, output)
+		column = "push_output"
 	default:
 		return fmt.Errorf("unknown action: %v", action)
 	}
+	return ib.dl.SaveBuildOutput(id, events, column)
 }
 
 const (
@@ -227,13 +244,18 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		return imageid, err2
 	}
 	// Parse final stream event to find image ID
-	fe := output[len(output)-1]
-	if strings.HasPrefix(fe.Stream, buildSuccessEventPrefix) {
-		imageid = strings.TrimRight(fe.Stream[len(buildSuccessEventPrefix):len(fe.Stream)], "\n")
-	} else {
-		return imageid, fmt.Errorf("could not determine image id from final event: %v", fe.Stream)
+	fes := output[len(output)-1].Message
+	dse := dockerStreamEvent{}
+	err = json.Unmarshal([]byte(fes), &dse)
+	if err != nil {
+		return imageid, fmt.Errorf("error marshaling final message to determine image id: %v", err)
 	}
-	ib.log(ctx, "built image ID %v", imageid)
+	if strings.HasPrefix(dse.Stream, buildSuccessEventPrefix) {
+		imageid = strings.TrimRight(dse.Stream[len(buildSuccessEventPrefix):len(dse.Stream)], "\n")
+	} else {
+		return imageid, fmt.Errorf("could not determine image id from final event: %v", dse.Stream)
+	}
+	ib.logf(ctx, "built image ID %v", imageid)
 	err = ib.dl.SetBuildTimeMetric(id, "docker_build_completed")
 	if err != nil {
 		return imageid, err
@@ -276,9 +298,10 @@ type dockerErrorDetail struct {
 }
 
 // monitorDockerAction reads the Docker API response stream
-func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser, atype actionType) ([]dockerStreamEvent, error) {
+func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser, atype actionType) ([]BuildEvent, error) {
 	rdr := bufio.NewReader(rc)
-	output := []dockerStreamEvent{}
+	output := []BuildEvent{}
+	var bevent *BuildEvent
 	for {
 		if isCancelled(ctx.Done()) {
 			return output, fmt.Errorf("action was cancelled: %v", ctx.Err())
@@ -301,8 +324,11 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 		} else {
 			errtype = BuildEventError_NO_ERROR
 		}
-		ib.event(ctx, buildEventTypeFromActionType(atype), errtype, string(line), false)
-		output = append(output, event)
+		bevent, err = ib.event(ctx, buildEventTypeFromActionType(atype), errtype, string(line), false)
+		if err != nil {
+			return output, err
+		}
+		output = append(output, *bevent)
 		if errtype == BuildEventError_FATAL {
 			return output, fmt.Errorf("fatal error performing %v action", atype.String())
 		}
@@ -318,7 +344,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
-	ib.log(ctx, "cleaning up images")
+	ib.logf(ctx, "cleaning up images")
 	err := ib.dl.SetBuildTimeMetric(id, "clean_started")
 	if err != nil {
 		return err
@@ -329,7 +355,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	}
 	resp, err := ib.c.ImageRemove(ctx, imageid, opts)
 	for _, r := range resp {
-		ib.log(ctx, "ImageDelete: %v", r)
+		ib.logf(ctx, "ImageDelete: %v", r)
 	}
 	if err != nil {
 		return err
@@ -348,7 +374,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
-	ib.log(ctx, "pushing")
+	ib.logf(ctx, "pushing")
 	err := ib.dl.SetBuildTimeMetric(id, "push_started")
 	if err != nil {
 		return err
@@ -381,7 +407,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		All:          true,
 		RegistryAuth: auth,
 	}
-	var output []dockerStreamEvent
+	var output []BuildEvent
 	for _, name := range ib.getFullImageNames(req) {
 		if isCancelled(ctx.Done()) {
 			return fmt.Errorf("push was cancelled: %v", ctx.Err())
@@ -400,7 +426,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	if err != nil {
 		return err
 	}
-	ib.log(ctx, "push completed")
+	ib.logf(ctx, "push completed")
 	return ib.saveOutput(ctx, Push, output)
 }
 

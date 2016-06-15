@@ -88,25 +88,16 @@ func build(cmd *cobra.Command, args []string) {
 	}
 	defer dnull.Close()
 
-	ib, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, dnull)
+	logger = log.New(dnull, "", log.LstdFlags)
+
+	ib, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}
 
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, logger)
-
-	workerChan = make(chan *workerRequest)
-	go func() {
-		var wreq *workerRequest
-		for {
-			wreq = <-workerChan
-			if !isCancelled(wreq.ctx.Done()) {
-				gs.syncBuild(wreq.ctx, wreq.req)
-			}
-		}
-	}()
+	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, 1, 1, logger)
 
 	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
 	if err != nil {

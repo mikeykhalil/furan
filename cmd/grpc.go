@@ -1,14 +1,10 @@
 package cmd
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"os"
-	"regexp"
 
 	"github.com/gocql/gocql"
 
@@ -18,77 +14,22 @@ import (
 )
 
 type GrpcServer struct {
-	ib     ImageBuildPusher
-	dl     DataLayer
-	ep     EventBusProducer
-	ec     EventBusConsumer
-	ls     io.Writer
-	logger *log.Logger
+	ib         ImageBuildPusher
+	dl         DataLayer
+	ep         EventBusProducer
+	ec         EventBusConsumer
+	ls         io.Writer
+	logger     *log.Logger
+	workerChan chan *workerRequest
+	qsize      uint
+	wcnt       uint
 }
 
 var grpcSvr *GrpcServer
-var workerChan chan *workerRequest
 
 type workerRequest struct {
 	ctx context.Context
 	req *BuildRequest
-}
-
-func startgRPC() {
-	imageBuilder, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, os.Stdout)
-	if err != nil {
-		log.Fatalf("error creating image builder: %v", err)
-	}
-
-	grpcSvr = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, logger)
-
-	runWorkers()
-	go listenRPC()
-}
-
-func runWorkers() {
-	workerChan = make(chan *workerRequest, serverConfig.queuesize)
-	for i := 0; uint(i) < serverConfig.concurrency; i++ {
-		go buildWorker()
-	}
-	logger.Printf("%v workers running (queue: %v)", serverConfig.concurrency, serverConfig.queuesize)
-}
-
-// NewGRPCServer returns a new instance of the gRPC server
-func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec EventBusConsumer, logger *log.Logger) *GrpcServer {
-	return &GrpcServer{
-		ib:     ib,
-		dl:     dl,
-		ep:     ep,
-		ec:     ec,
-		logger: logger,
-	}
-}
-
-func buildWorker() {
-	var wreq *workerRequest
-	for {
-		wreq = <-workerChan
-		if !isCancelled(wreq.ctx.Done()) {
-			grpcSvr.syncBuild(wreq.ctx, wreq.req)
-		} else {
-			id, _ := BuildIDFromContext(wreq.ctx)
-			logger.Printf("context is cancelled, skipping: %v", id)
-		}
-	}
-}
-
-func listenRPC() {
-	addr := fmt.Sprintf("%v:%v", serverConfig.grpcAddr, serverConfig.grpcPort)
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Printf("error starting gRPC listener: %v", err)
-		return
-	}
-	s := grpc.NewServer()
-	RegisterFuranExecutorServer(s, grpcSvr)
-	log.Printf("gRPC listening on: %v", addr)
-	s.Serve(l)
 }
 
 type ctxIDKeyType string
@@ -106,6 +47,61 @@ func BuildIDFromContext(ctx context.Context) (gocql.UUID, bool) {
 	return id, ok
 }
 
+// NewGRPCServer returns a new instance of the gRPC server
+func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec EventBusConsumer, queuesize uint, concurrency uint, logger *log.Logger) *GrpcServer {
+	grs := &GrpcServer{
+		ib:         ib,
+		dl:         dl,
+		ep:         ep,
+		ec:         ec,
+		logger:     logger,
+		workerChan: make(chan *workerRequest, queuesize),
+		qsize:      queuesize,
+		wcnt:       concurrency,
+	}
+	grs.runWorkers()
+	return grs
+}
+
+func (gr *GrpcServer) runWorkers() {
+	for i := 0; uint(i) < gr.wcnt; i++ {
+		go gr.buildWorker()
+	}
+	gr.logf("%v workers running (queue: %v)", serverConfig.concurrency, serverConfig.queuesize)
+}
+
+func (gr *GrpcServer) buildWorker() {
+	var wreq *workerRequest
+	var err error
+	var id gocql.UUID
+	for {
+		wreq = <-gr.workerChan
+		if !isCancelled(wreq.ctx.Done()) {
+			gr.syncBuild(wreq.ctx, wreq.req)
+		} else {
+			id, _ = BuildIDFromContext(wreq.ctx)
+			gr.logf("context is cancelled, skipping: %v", id)
+			if err = gr.dl.DeleteBuild(id); err != nil {
+				gr.logf("error deleting build: %v", err)
+			}
+		}
+	}
+}
+
+// ListenRPC starts the RPC listener on addr:port
+func (gr *GrpcServer) ListenRPC(addr string, port uint) error {
+	addr = fmt.Sprintf("%v:%v", addr, port)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		gr.logf("error starting gRPC listener: %v", err)
+		return err
+	}
+	s := grpc.NewServer()
+	RegisterFuranExecutorServer(s, grpcSvr)
+	gr.logf("gRPC listening on: %v", addr)
+	return s.Serve(l)
+}
+
 func (gr *GrpcServer) logf(msg string, params ...interface{}) {
 	gr.logger.Printf(msg, params...)
 }
@@ -118,7 +114,7 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		gr.logf("build id missing from context")
 		return
 	}
-	gr.logf("syncBuild started")
+	gr.logf("syncBuild started: %v", id.String())
 	// Finalize build and send event. Failures should set err and return the appropriate build state.
 	defer func(id gocql.UUID) {
 		failed := outcome == BuildStatusResponse_BUILD_FAILURE || outcome == BuildStatusResponse_PUSH_FAILURE
@@ -145,7 +141,17 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		if err2 := gr.dl.SetBuildFlags(id, flags); err2 != nil {
 			gr.logf("failBuild: error setting build flags: %v", err2)
 		}
-		if err2 := gr.ep.PublishEvent(id, msg, BuildEvent_LOG, eet, true); err2 != nil {
+		event := &BuildEvent{
+			EventError: &BuildEventError{
+				ErrorType: eet,
+				IsError:   eet != BuildEventError_NO_ERROR,
+			},
+			BuildId:       id.String(),
+			BuildFinished: true,
+			EventType:     BuildEvent_LOG,
+			Message:       msg,
+		}
+		if err2 := gr.ep.PublishEvent(event); err2 != nil {
 			gr.logf("failBuild: error publishing event: %v", err2)
 		}
 		gr.logf("%v: %v: failed: %v", id.String(), msg, flags["failed"])
@@ -214,7 +220,7 @@ func (gr *GrpcServer) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 		req: req,
 	}
 	select {
-	case workerChan <- &wreq:
+	case gr.workerChan <- &wreq:
 		gr.logf("queueing build: %v", id.String())
 		resp.BuildId = id.String()
 		return resp, nil
@@ -245,39 +251,19 @@ func (gr *GrpcServer) GetBuildStatus(ctx context.Context, req *BuildStatusReques
 	return resp, nil
 }
 
-var dbPattern = regexp.MustCompile(`^{"stream":"`)
-var dpPattern = regexp.MustCompile(`^{"status":".+"progressDetail"`)
-
-func (gr *GrpcServer) eventFromBytes(eb []byte) *BuildEvent {
-	event := &BuildEvent{
-		EventError: &BuildEventError{ErrorType: BuildEventError_NO_ERROR},
-	}
-	switch {
-	case dbPattern.Match(eb):
-		event.EventType = BuildEvent_DOCKER_BUILD_STREAM
-	case dpPattern.Match(eb):
-		event.EventType = BuildEvent_DOCKER_PUSH_STREAM
-	default:
-		event.EventType = BuildEvent_LOG
-	}
-	event.Message = string(eb)
-	return event
-}
-
 // Reconstruct the stream of events for a build from the data layer
-func (gr *GrpcServer) eventsFromDL(stream FuranExecutor_MonitorBuildServer, build *BuildStatusResponse) error {
-	rdr := bufio.NewReader(bytes.NewBuffer(append(build.BuildOutput, build.PushOutput...)))
-	var err error
-	var line []byte
-	for {
-		line, err = rdr.ReadBytes('\n')
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return grpc.Errorf(codes.Internal, "error reading stored build output stream: %v", err)
-		}
-		err = stream.Send(gr.eventFromBytes(line))
+func (gr *GrpcServer) eventsFromDL(stream FuranExecutor_MonitorBuildServer, id gocql.UUID) error {
+	bo, err := gr.dl.GetBuildOutput(id, "build_output")
+	if err != nil {
+		return fmt.Errorf("error getting build output: %v", err)
+	}
+	po, err := gr.dl.GetBuildOutput(id, "push_output")
+	if err != nil {
+		return fmt.Errorf("error getting push output: %v", err)
+	}
+	events := append(bo, po...)
+	for _, event := range events {
+		err = stream.Send(&event)
 		if err != nil {
 			return grpc.Errorf(codes.Internal, "error sending event: %v", err)
 		}
@@ -314,6 +300,7 @@ func (gr *GrpcServer) eventsFromEventBus(stream FuranExecutor_MonitorBuildServer
 	}
 }
 
+// MonitorBuild streams events from a specified build
 func (gr *GrpcServer) MonitorBuild(req *BuildStatusRequest, stream FuranExecutor_MonitorBuildServer) error {
 	id, err := gocql.ParseUUID(req.BuildId)
 	if err != nil {
@@ -324,11 +311,12 @@ func (gr *GrpcServer) MonitorBuild(req *BuildStatusRequest, stream FuranExecutor
 		return grpc.Errorf(codes.Internal, "error getting build: %v", err)
 	}
 	if build.Finished { // No need to use Kafka, just stream events from the data layer
-		return gr.eventsFromDL(stream, build)
+		return gr.eventsFromDL(stream, id)
 	}
 	return gr.eventsFromEventBus(stream, id)
 }
 
+// CancelBuild stops a currently-running build
 func (gr *GrpcServer) CancelBuild(ctx context.Context, req *BuildCancelRequest) (*BuildStatusResponse, error) {
 	return &BuildStatusResponse{}, nil
 }

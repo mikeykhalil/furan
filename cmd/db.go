@@ -132,6 +132,14 @@ var requiredTables = []cassandra.CTable{
 			"docker_image_vsize bigint",
 		},
 	},
+	cassandra.CTable{
+		Name: "build_events_by_id",
+		Columns: []string{
+			"id uuid PRIMARY KEY",
+			"build_output list<blob>",
+			"push_output list<blob>",
+		},
+	},
 }
 
 // GetNodesFromConsul queries the local Consul agent for the given service,
