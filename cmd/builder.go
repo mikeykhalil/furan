@@ -241,7 +241,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		return imageid, err
 	}
 	if err2 != nil {
-		return imageid, err2
+		return imageid, fmt.Errorf("error saving action output: %v", err2)
 	}
 	// Parse final stream event to find image ID
 	fes := output[len(output)-1].Message

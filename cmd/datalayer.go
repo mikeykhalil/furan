@@ -50,6 +50,11 @@ func (dl *DBLayer) CreateBuild(req *BuildRequest) (gocql.UUID, error) {
 		return id, err
 	}
 	q = `INSERT INTO build_metrics_by_id (id) VALUES (?);`
+	err = dl.s.Query(q, id).Exec()
+	if err != nil {
+		return id, err
+	}
+	q = `INSERT INTO build_events_by_id (id) VALUES (?);`
 	return id, dl.s.Query(q, id).Exec()
 }
 
@@ -177,7 +182,7 @@ func (dl *DBLayer) SaveBuildOutput(id gocql.UUID, output []BuildEvent, column st
 		}
 		serialized[i] = b
 	}
-	q := `INSERT INTO build_events_by_id SET %v = ? WHERE id = ?;`
+	q := `UPDATE build_events_by_id SET %v = ? WHERE id = ?;`
 	return dl.s.Query(fmt.Sprintf(q, column), serialized, id.String()).Exec()
 }
 
