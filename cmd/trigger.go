@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"time"
 
+	consul "github.com/hashicorp/consul/api"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -15,6 +18,8 @@ const (
 	connTimeoutSecs = 10
 )
 
+var discoverFuranHost bool
+var consulFuranSvcName string
 var remoteFuranHost string
 
 // triggerCmd represents the trigger command
@@ -27,6 +32,8 @@ var triggerCmd = &cobra.Command{
 
 func init() {
 	triggerCmd.PersistentFlags().StringVar(&remoteFuranHost, "remote-host", "", "Remote Furan server with gRPC port (eg: furan.me.com:4001)")
+	triggerCmd.PersistentFlags().BoolVar(&discoverFuranHost, "consul-discovery", false, "Discover Furan hosts via Consul")
+	triggerCmd.PersistentFlags().StringVar(&consulFuranSvcName, "svc-name", "furan", "Consul service name for Furan hosts")
 	triggerCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.GithubRepo, "github-repo", "", "source github repo")
 	triggerCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.Ref, "source-ref", "master", "source git ref")
 	triggerCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.DockerfilePath, "dockerfile-path", "Dockerfile", "Dockerfile path (optional)")
@@ -45,13 +52,67 @@ func rpcerr(err error, msg string, params ...interface{}) {
 	clierr("rpc error: %v: %v: %v", msg, code.String(), err)
 }
 
+type furanNode struct {
+	addr string
+	port int
+}
+
+func randomRange(max int) (int64, error) {
+	maxBig := *big.NewInt(int64(max))
+	n, err := rand.Int(rand.Reader, &maxBig)
+	if err != nil {
+		return 0, err
+	}
+	return n.Int64(), nil
+}
+
+func getFuranServerFromConsul(svc string) (*furanNode, error) {
+	nodes := []furanNode{}
+	c, err := consul.NewClient(consul.DefaultConfig())
+	if err != nil {
+		return nil, err
+	}
+	se, _, err := c.Health().Service(svc, "", true, &consul.QueryOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if len(se) == 0 {
+		return nil, fmt.Errorf("no furan hosts found via Consul")
+	}
+	for _, s := range se {
+		n := furanNode{
+			addr: s.Node.Address,
+			port: s.Service.Port,
+		}
+		nodes = append(nodes, n)
+	}
+	i, err := randomRange(len(nodes) - 1) // Random node
+	if err != nil {
+		return nil, err
+	}
+	return &nodes[i], nil
+}
+
 func trigger(cmd *cobra.Command, args []string) {
 	if remoteFuranHost == "" {
-		clierr("remote host is required")
+		if !discoverFuranHost || consulFuranSvcName == "" {
+			clierr("remote host or consul discovery is required")
+		}
 	}
 	validateCLIBuildRequest()
 
-	log.Printf("connecting to %v", remoteFuranHost)
+	var remoteHost string
+	if discoverFuranHost {
+		n, err := getFuranServerFromConsul(consulFuranSvcName)
+		if err != nil {
+			clierr("error discovering Furan hosts: %v", err)
+		}
+		remoteHost = fmt.Sprintf("%v:%v", n.addr, n.port)
+	} else {
+		remoteHost = remoteFuranHost
+	}
+
+	log.Printf("connecting to %v", remoteHost)
 	conn, err := grpc.Dial(remoteFuranHost, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(connTimeoutSecs*time.Second))
 	if err != nil {
 		clierr("error connecting to remote host: %v", err)
