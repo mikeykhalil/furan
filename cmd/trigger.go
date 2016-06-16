@@ -113,7 +113,7 @@ func trigger(cmd *cobra.Command, args []string) {
 	}
 
 	log.Printf("connecting to %v", remoteHost)
-	conn, err := grpc.Dial(remoteFuranHost, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(connTimeoutSecs*time.Second))
+	conn, err := grpc.Dial(remoteHost, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(connTimeoutSecs*time.Second))
 	if err != nil {
 		clierr("error connecting to remote host: %v", err)
 	}
