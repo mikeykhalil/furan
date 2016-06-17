@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	docker "github.com/docker/engine-api/client"
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 )
@@ -83,7 +84,12 @@ func healthcheck() {
 }
 
 func startgRPC() {
-	imageBuilder, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, logger)
+	gf := NewGitHubFetcher(gitConfig.token)
+	dc, err := docker.NewEnvClient()
+	if err != nil {
+		log.Fatalf("error creating Docker client: %v", err)
+	}
+	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}

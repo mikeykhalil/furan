@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 
+	docker "github.com/docker/engine-api/client"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 )
@@ -90,7 +91,13 @@ func build(cmd *cobra.Command, args []string) {
 
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	ib, err := NewImageBuilder(gitConfig.token, kafkaConfig.manager, dbConfig.datalayer, logger)
+	gf := NewGitHubFetcher(gitConfig.token)
+	dc, err := docker.NewEnvClient()
+	if err != nil {
+		clierr("error creating Docker client: %v", err)
+	}
+
+	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}

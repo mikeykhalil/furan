@@ -11,7 +11,6 @@ import (
 
 	"golang.org/x/net/context"
 
-	docker "github.com/docker/engine-api/client"
 	dtypes "github.com/docker/engine-api/types"
 	"github.com/gocql/gocql"
 )
@@ -61,24 +60,22 @@ type ImageBuildPusher interface {
 
 // ImageBuilder is an object that builds and pushes images
 type ImageBuilder struct {
-	c      ImageBuildClient
-	gf     CodeFetcher
-	ep     EventBusProducer
-	dl     DataLayer
-	logger *log.Logger
+	c         ImageBuildClient
+	gf        CodeFetcher
+	ep        EventBusProducer
+	dl        DataLayer
+	dockercfg map[string]dtypes.AuthConfig
+	logger    *log.Logger
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(ghtoken string, eventbus EventBusProducer, datalayer DataLayer, logger *log.Logger) (*ImageBuilder, error) {
+func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, dcfg map[string]dtypes.AuthConfig, logger *log.Logger) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
-	ib.gf = NewGitHubFetcher(ghtoken)
-	dc, err := docker.NewEnvClient()
-	if err != nil {
-		return ib, err
-	}
+	ib.gf = gf
 	ib.c = dc
 	ib.ep = eventbus
 	ib.dl = datalayer
+	ib.dockercfg = dcfg
 	ib.logger = logger
 	return ib, nil
 }
@@ -229,7 +226,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		ForceRemove: true,
 		PullParent:  true,
 		Dockerfile:  rbi.DockerfilePath,
-		AuthConfigs: dockerConfig.dockercfgContents,
+		AuthConfigs: ib.dockercfg,
 	}
 	ibr, err := ib.c.ImageBuild(ctx, rbi.Context, opts)
 	if err != nil {
@@ -394,7 +391,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		return fmt.Errorf("cannot determine base registry URL from %v", repo)
 	}
 	var auth string
-	if val, ok := dockerConfig.dockercfgContents[registry]; ok {
+	if val, ok := ib.dockercfg[registry]; ok {
 		j, err := json.Marshal(&val)
 		if err != nil {
 			return fmt.Errorf("error marshaling auth: %v", err)
