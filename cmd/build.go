@@ -41,11 +41,6 @@ func init() {
 	RootCmd.AddCommand(buildCmd)
 }
 
-func clierr(msg string, params ...interface{}) {
-	fmt.Fprintf(os.Stderr, msg+"\n", params...)
-	os.Exit(1)
-}
-
 func validateCLIBuildRequest() {
 	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
 	if cliBuildRequest.Push.Registry.Repo == "" &&
