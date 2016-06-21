@@ -91,6 +91,11 @@ func init() {
 	RootCmd.PersistentFlags().UintVarP(&kafkaConfig.maxOpenSends, "kafka-max-open-sends", "j", 100, "Max number of simultaneous in-flight Kafka message sends")
 }
 
+func clierr(msg string, params ...interface{}) {
+	fmt.Fprintf(os.Stderr, msg+"\n", params...)
+	os.Exit(1)
+}
+
 func isCancelled(done <-chan struct{}) bool {
 	select {
 	case <-done:
