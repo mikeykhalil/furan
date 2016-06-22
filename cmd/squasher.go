@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	scratchRoot = "scratch"
-	outputRoot  = "output"
+	// needed for correct file modes for tar archive entries
+	regFileMode = 0100644
+	dirMode     = 040755
 )
 
 // Models representing image metadata schemas
@@ -32,14 +33,14 @@ type DockerImageManifest struct {
 // DockerImageConfig represents the image config json file in the root of an
 // image archive
 type DockerImageConfig struct {
-	Architecture    string                 `json:"architecture"`
-	Config          map[string]interface{} `json:"config"`
-	Container       string                 `json:"container"`
-	ContainerConfig map[string]interface{} `json:"container_config"`
-	Created         string                 `json:"created"`
-	DockerVersion   string                 `json:"docker_version"`
-	History         []map[string]string    `json:"history"`
-	OS              string                 `json:"os"`
+	Architecture    string                   `json:"architecture"`
+	Config          map[string]interface{}   `json:"config"`
+	Container       string                   `json:"container"`
+	ContainerConfig map[string]interface{}   `json:"container_config"`
+	Created         string                   `json:"created"`
+	DockerVersion   string                   `json:"docker_version"`
+	History         []map[string]interface{} `json:"history"`
+	OS              string                   `json:"os"`
 	RootFS          struct {
 		Type    string   `json:"type"`
 		DiffIDs []string `json:"diff_ids"`
@@ -83,18 +84,26 @@ func (dis *DockerImageSquasher) Squash(ctx context.Context, input io.Reader) (io
 	if !ok {
 		return nil, fmt.Errorf("manifest.json not found in image archive")
 	}
+	mraw := []DockerImageManifest{}
 	manifest := DockerImageManifest{}
 
-	err = json.Unmarshal(mentry.Contents, &manifest)
+	err = json.Unmarshal(mentry.Contents, &mraw)
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshaling image manifest: %v", err)
 	}
+	if len(mraw) != 1 {
+		return nil, fmt.Errorf("unexpected image manifest array length (expected 1): %v", len(mraw))
+	}
+	manifest = mraw[0]
 
 	if len(manifest.Layers) < 2 {
 		return nil, fmt.Errorf("no need to squash: image has one layer")
 	}
 
-	rmlayers := manifest.Layers[0 : len(manifest.Layers)-2]
+	rmlayers := []string{}
+	for _, l := range manifest.Layers[0 : len(manifest.Layers)-1] {
+		rmlayers = append(rmlayers, strings.Replace(l, "/layer.tar", "", 1))
+	}
 
 	// Iterate through layers, unpacking and processing whiteouts
 	flc, err := dis.processLayers(ctx, imap, &manifest)
@@ -118,6 +127,11 @@ func (dis *DockerImageSquasher) Squash(ctx context.Context, input io.Reader) (io
 	return dis.finalImage(ctx, imap, flmap, mdmap, rmlayers)
 }
 
+// finalLayerID returns the final layer ID from a given manifest
+func (dis *DockerImageSquasher) finalLayerID(manifest *DockerImageManifest) string {
+	return strings.Replace(manifest.Layers[len(manifest.Layers)-1], "/layer.tar", "", 1)
+}
+
 // finalImage takes the original input map and merges in the maps produced in
 // previous steps, removes squashed layers and then serializes the result into a tar stream
 func (dis *DockerImageSquasher) finalImage(ctx context.Context, imap map[string]*tarEntry, flmap map[string]*tarEntry, mdmap map[string]*tarEntry, rmlayers []string) (io.Reader, error) {
@@ -136,6 +150,20 @@ func (dis *DockerImageSquasher) finalImage(ctx context.Context, imap map[string]
 		}
 		imap[k] = v
 	}
+	var jn, vn, tn, ldir, l, v string
+	var ok bool
+	for _, l = range rmlayers {
+		jn = fmt.Sprintf("%v/json", l)
+		vn = fmt.Sprintf("%v/VERSION", l)
+		tn = fmt.Sprintf("%v/layer.tar", l)
+		ldir = fmt.Sprintf("%v/", l)
+		for _, v = range []string{jn, vn, tn, ldir} {
+			if _, ok = imap[v]; !ok {
+				return nil, fmt.Errorf("removing layer: file missing from input map: %v", v)
+			}
+			delete(imap, v)
+		}
+	}
 	fi, err := dis.serializeTarEntries(imap)
 	if err != nil {
 		return nil, fmt.Errorf("error serializing final image: %v", err)
@@ -153,7 +181,7 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 		return nil, fmt.Errorf("squash was cancelled")
 	}
 	out := make(map[string]*tarEntry)
-	flid := manifest.Layers[len(manifest.Layers)-1]
+	flid := dis.finalLayerID(manifest)
 	fln := fmt.Sprintf("%v/layer.tar", flid)
 	if _, ok := flmap[fln]; !ok {
 		return out, fmt.Errorf("final layer tar not found after serializing: %v", flid)
@@ -171,12 +199,14 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 		return out, fmt.Errorf("error deserializing top level config: %v", err)
 	}
 	config.RootFS.DiffIDs = []string{diffid}
-	manifest.Layers = []string{flid}
+	config.History = []map[string]interface{}{config.History[len(config.History)-1]}
+	manifest.Layers = []string{fmt.Sprintf("%v/layer.tar", flid)}
 	cb, err := json.Marshal(&config)
 	if err != nil {
 		return out, fmt.Errorf("error marshaling image config: %v", err)
 	}
-	mb, err := json.Marshal(&manifest)
+	marr := []DockerImageManifest{*manifest}
+	mb, err := json.Marshal(&marr)
 	if err != nil {
 		return out, fmt.Errorf("error marshaling image manifest: %v", err)
 	}
@@ -184,6 +214,7 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 		Header: &tar.Header{
 			Name:     manifest.Config,
 			Typeflag: tar.TypeReg,
+			Mode:     regFileMode,
 		},
 		Contents: cb,
 	}
@@ -191,6 +222,7 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 		Header: &tar.Header{
 			Name:     "manifest.json",
 			Typeflag: tar.TypeReg,
+			Mode:     regFileMode,
 		},
 		Contents: mb,
 	}
@@ -205,7 +237,7 @@ func (dis *DockerImageSquasher) constructFinalLayer(ctx context.Context, manifes
 		return nil, fmt.Errorf("squash was cancelled")
 	}
 	flmd := DockerLayerJSON{}
-	flid := manifest.Layers[len(manifest.Layers)-1]
+	flid := dis.finalLayerID(manifest)
 	flmdent, ok := imap[fmt.Sprintf("%v/json", flid)]
 	if !ok {
 		return nil, fmt.Errorf("final layer json not found in image archive: %v", flid)
@@ -234,10 +266,12 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 		return nil, fmt.Errorf("error serializing layer: %v", err)
 	}
 	md.Parent = ""
-	out[md.ID] = &tarEntry{
+	mdn := fmt.Sprintf("%v/", md.ID)
+	out[mdn] = &tarEntry{
 		Header: &tar.Header{
-			Name:     md.ID,
+			Name:     mdn,
 			Typeflag: tar.TypeDir,
+			Mode:     dirMode,
 		},
 		Contents: []byte{},
 	}
@@ -251,6 +285,7 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 			Name:     jn,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len(mdb)),
+			Mode:     regFileMode,
 		},
 		Contents: mdb,
 	}
@@ -260,6 +295,7 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 			Name:     vn,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len(version)),
+			Mode:     regFileMode,
 		},
 		Contents: version,
 	}
@@ -269,6 +305,7 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 			Name:     tn,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len(layertar)),
+			Mode:     regFileMode,
 		},
 		Contents: layertar,
 	}
@@ -281,6 +318,7 @@ func (dis *DockerImageSquasher) serializeTarEntries(input map[string]*tarEntry) 
 	w := tar.NewWriter(wb)
 	defer w.Close()
 	for k, v := range input {
+		v.Header.Size = int64(len(v.Contents))
 		err := w.WriteHeader(v.Header)
 		if err != nil {
 			return nil, fmt.Errorf("error writing layer tar header: %v: %v", k, err)
@@ -299,16 +337,21 @@ func (dis *DockerImageSquasher) serializeTarEntries(input map[string]*tarEntry) 
 func (dis *DockerImageSquasher) processLayers(ctx context.Context, imap map[string]*tarEntry, manifest *DockerImageManifest) (map[string]*tarEntry, error) {
 	var err error
 	var ok bool
+	var ldir string
 	omap := make(map[string]*tarEntry)
 	for _, l := range manifest.Layers {
 		if isCancelled(ctx.Done()) {
 			return nil, fmt.Errorf("squash was cancelled")
 		}
-		_, ok = imap[l]
-		if !ok {
-			return nil, fmt.Errorf("layer directory not found in image archive: %v", l)
+		if !strings.HasSuffix(l, "/layer.tar") {
+			return nil, fmt.Errorf("unexpected format for layer entry (expected '.../layer.tar'): %v", l)
 		}
-		ltar, ok := imap[fmt.Sprintf("%v/layer.tar", l)]
+		ldir = strings.Replace(l, "layer.tar", "", 1)
+		_, ok = imap[ldir]
+		if !ok {
+			return nil, fmt.Errorf("layer directory not found in image archive: %v", ldir)
+		}
+		ltar, ok := imap[l]
 		if !ok {
 			return nil, fmt.Errorf("layer tar not found in image archive: %v", l)
 		}
@@ -343,9 +386,12 @@ func (dis *DockerImageSquasher) processLayer(ctx context.Context, layertar []byt
 		}
 		bn = path.Base(h.Name)
 		if strings.HasPrefix(bn, ".wh.") {
-			wt = strings.Replace(h.Name, ".wh.", "", 0)
+			wt = strings.Replace(h.Name, ".wh.", "", 1)
 			if _, ok = outputmap[wt]; !ok {
-				return fmt.Errorf("target not found for whiteout: %v", h.Name)
+				wt = fmt.Sprintf("%v/", wt) // directory whiteouts need a slash appended
+				if _, ok := outputmap[wt]; !ok {
+					return fmt.Errorf("target not found for whiteout: %v: %v", wt, h.Name)
+				}
 			}
 			delete(outputmap, wt)
 			continue
