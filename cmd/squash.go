@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"io"
+	"log"
 	"os"
 
-	"golang.org/x/net/context"
-
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
 )
+
+var verboseSquash bool
 
 // squashCmd represents the squash command
 var squashCmd = &cobra.Command{
@@ -21,6 +24,7 @@ Specify "-" for input or output to use stdin or stdout, respectively.`,
 }
 
 func init() {
+	squashCmd.PersistentFlags().BoolVar(&verboseSquash, "verbose", false, "verbose output")
 	RootCmd.AddCommand(squashCmd)
 }
 
@@ -51,14 +55,38 @@ func squash(cmd *cobra.Command, args []string) {
 			clierr("error opening input: %v", err)
 		}
 	}
+	var sink io.Writer
+	if verboseSquash {
+		sink = os.Stderr
+	} else {
+		var dnull *os.File
+		dnull, err = os.Open(os.DevNull)
+		if err != nil {
+			clierr("error opening %v: %v", os.DevNull, err)
+		}
+		defer dnull.Close()
+		sink = dnull
+	}
+	logger = log.New(sink, "", log.LstdFlags)
+	squasher := NewDockerImageSquasher(logger)
 
-	squasher := DockerImageSquasher{}
-	sqi, err := squasher.Squash(context.Background(), input)
+	si, err := squasher.Squash(context.Background(), input, output)
 	if err != nil {
 		clierr("error squashing: %v", err)
 	}
-	_, err = io.Copy(output, sqi)
-	if err != nil {
-		clierr("error writing output: %v", err)
+	logger.Printf("***** squash stats *****\n")
+	logger.Printf("input size: %v (%v bytes)\n", humanize.Bytes(si.InputBytes), si.InputBytes)
+	logger.Printf("output size: %v (%v bytes)\n", humanize.Bytes(si.OutputBytes), si.OutputBytes)
+	var numprefix string
+	var diffnum uint64
+	if si.SizeDifference < 0 {
+		numprefix = "-"
+		diffnum = uint64(-si.SizeDifference)
+	} else {
+		diffnum = uint64(si.SizeDifference)
 	}
+	pct := (float64(diffnum) / float64(si.InputBytes)) * 100
+	logger.Printf("image size difference: %v%v (%v bytes) - %.3f%% reduction\n", numprefix, humanize.Bytes(diffnum), si.SizeDifference, pct)
+	logger.Printf("layers removed: %v\n", si.LayersRemoved)
+	logger.Printf("files removed: %v\n", si.FilesRemovedCount)
 }
