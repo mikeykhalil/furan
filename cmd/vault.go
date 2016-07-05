@@ -46,7 +46,7 @@ func vaultPath(path string) string {
 func setupVault() {
 	vc, err := getVaultClient()
 	if err != nil {
-		log.Fatalf("Error creating Vault client; %v", err)
+		log.Fatalf("Error creating Vault client: %v", err)
 	}
 	ght, err := vc.GetValue(vaultPath(gitConfig.tokenVaultPath))
 	if err != nil {
@@ -58,12 +58,31 @@ func setupVault() {
 	}
 	gitConfig.token = safeStringCast(ght)
 	dockerConfig.dockercfgRaw = safeStringCast(dcc)
+	ak, sk := getAWSCreds(awscredsprefix)
+	awsConfig.AccessKeyID = ak
+	awsConfig.SecretAccessKey = sk
+}
+
+func getAWSCreds(pfx string) (string, string) {
+	vc, err := getVaultClient()
+	if err != nil {
+		log.Fatalf("Error creating Vault client: %v", err)
+	}
+	ak, err := vc.GetValue(vaultPath(pfx + "/access_key_id"))
+	if err != nil {
+		log.Fatalf("Error getting AWS access key ID: %v", err)
+	}
+	sk, err := vc.GetValue(vaultPath(pfx + "/secret_access_key"))
+	if err != nil {
+		log.Fatalf("Error getting AWS secret access key: %v", err)
+	}
+	return safeStringCast(ak), safeStringCast(sk)
 }
 
 func getSumoURL() {
 	vc, err := getVaultClient()
 	if err != nil {
-		log.Fatalf("Error creating Vault client; %v", err)
+		log.Fatalf("Error creating Vault client: %v", err)
 	}
 	scu, err := vc.GetValue(vaultPath(serverConfig.vaultSumoURLPath))
 	if err != nil {
@@ -76,7 +95,7 @@ func getSumoURL() {
 func writeTLSCert() (string, string) {
 	vc, err := getVaultClient()
 	if err != nil {
-		log.Fatalf("Error creating Vault client; %v", err)
+		log.Fatalf("Error creating Vault client: %v", err)
 	}
 	cert, err := vc.GetValue(vaultPath(serverConfig.vaultTLSCertPath))
 	if err != nil {

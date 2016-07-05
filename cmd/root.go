@@ -34,11 +34,13 @@ type dockerconfig struct {
 var vaultConfig vaultconfig
 var gitConfig gitconfig
 var dockerConfig dockerconfig
+var awsConfig AWSConfig
 
 var nodestr string
 var datacenterstr string
 var initializeDB bool
 var kafkaBrokerStr string
+var awscredsprefix string
 
 // used by build and trigger commands
 var cliBuildRequest = BuildRequest{
@@ -66,11 +68,6 @@ func Execute() {
 }
 
 func init() {
-	home := os.Getenv("HOME")
-	if home != "" {
-		home += "/"
-	}
-
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.addr, "vault-addr", "a", "https://vault-prod.shave.io:8200", "Vault URL")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.token, "vault-token", "t", os.Getenv("VAULT_TOKEN"), "Vault token (if using token auth)")
 	RootCmd.PersistentFlags().BoolVarP(&vaultConfig.tokenAuth, "vault-token-auth", "k", false, "Use Vault token-based auth")
@@ -89,6 +86,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&kafkaBrokerStr, "kafka-brokers", "f", "localhost:9092", "Comma-delimited list of Kafka brokers")
 	RootCmd.PersistentFlags().StringVarP(&kafkaConfig.topic, "kafka-topic", "m", "furan-events", "Kafka topic to publish build events (required for build monitoring)")
 	RootCmd.PersistentFlags().UintVarP(&kafkaConfig.maxOpenSends, "kafka-max-open-sends", "j", 100, "Max number of simultaneous in-flight Kafka message sends")
+	RootCmd.PersistentFlags().StringVarP(&awscredsprefix, "aws-creds-vault-prefix", "c", "/aws", "Vault path prefix for AWS credentials (paths: {vault prefix}/{aws creds prefix}/access_key_id|secret_access_key)")
+	RootCmd.PersistentFlags().UintVarP(&awsConfig.Concurrency, "s3-concurrency", "o", 10, "Number of concurrent upload/download threads for S3 transfers")
 }
 
 func clierr(msg string, params ...interface{}) {
