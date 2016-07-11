@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"os"
 	"time"
 
 	consul "github.com/hashicorp/consul/api"
@@ -145,5 +146,8 @@ func trigger(cmd *cobra.Command, args []string) {
 			rpcerr(err, "stream.Recv")
 		}
 		fmt.Println(event.Message)
+		if event.EventError.IsError {
+			os.Exit(1)
+		}
 	}
 }
