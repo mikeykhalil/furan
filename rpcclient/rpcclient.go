@@ -24,7 +24,7 @@ const (
 	connTimeoutSecs = 30
 )
 
-// ImageBuilder describes an object capable of building and pushing container images
+// ImageBuildPusher describes an object capable of building and pushing container images
 type ImageBuildPusher interface {
 	Build(context.Context, chan *BuildEvent, *BuildRequest) (string, error)
 }
