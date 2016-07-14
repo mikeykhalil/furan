@@ -1,7 +1,6 @@
 /*
 This package implements a Furan RPC client that can be directly imported by other Go programs.
 It uses Consul service discovery to pick a random node.
-TODO: Implement optional node selection by network latency
 */
 
 package rpcclient
@@ -11,6 +10,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -24,6 +25,16 @@ const (
 	connTimeoutSecs = 30
 )
 
+//go:generate stringer -type=NodeSelectionStrategy
+
+//NodeSelectionStrategy enumerates the ways that rpcclient will use to pick a node
+type NodeSelectionStrategy int
+
+const (
+	RandomNodeSelection NodeSelectionStrategy = iota // Choose a random node
+	NetworkProximity                                 // Pick the closest node as determined by Consul
+)
+
 // ImageBuildPusher describes an object capable of building and pushing container images
 type ImageBuildPusher interface {
 	Build(context.Context, chan *BuildEvent, *BuildRequest) (string, error)
@@ -35,6 +46,16 @@ type FuranClient struct {
 	logger *log.Logger
 }
 
+// DiscoveryOptions describes the options for determining the Furan node to use
+// for the client.
+type DiscoveryOptions struct {
+	UseConsul         bool                  // Whether to use Consul service discovery
+	ConsulAddr        string                // Consul address to use (defaults to '127.0.0.1:8500')
+	SelectionStrategy NodeSelectionStrategy // If UseConsul is true, this specifies the strategy for node selection
+	ServiceName       string                // Required if UseConsul is true
+	NodeList          []string              // Required if UseConsul is false. Nodes in the format "{host}:{port}". A random host will be used if len(NodeList) > 1
+}
+
 type furanNode struct {
 	addr string
 	port int
@@ -42,44 +63,84 @@ type furanNode struct {
 
 // NewFuranClient takes a Consul service name and returns a client which connects
 // to a randomly chosen Furan host and uses the optional logger
-func NewFuranClient(svc string, logger *log.Logger) (*FuranClient, error) {
+func NewFuranClient(opts *DiscoveryOptions, logger *log.Logger) (*FuranClient, error) {
 	fc := &FuranClient{}
 	if logger == nil {
 		fc.logger = log.New(os.Stderr, "", log.LstdFlags)
 	} else {
 		fc.logger = logger
 	}
-	err := fc.init(svc)
+	if opts.UseConsul {
+		if opts.ServiceName == "" {
+			return nil, fmt.Errorf("ConsulService is required if UseConsul is true")
+		}
+	} else {
+		if len(opts.NodeList) == 0 {
+			return nil, fmt.Errorf("non-empty NodeList is required if UseConsul is false")
+		}
+		opts.SelectionStrategy = RandomNodeSelection
+	}
+	err := fc.init(opts)
 	return fc, err
 }
 
-func (fc *FuranClient) init(svc string) error {
+func (fc *FuranClient) init(opts *DiscoveryOptions) error {
 	nodes := []furanNode{}
-	c, err := consul.NewClient(consul.DefaultConfig())
-	if err != nil {
-		return err
-	}
-	fc.logger.Printf("connecting to Consul on localhost")
-	se, _, err := c.Health().Service(svc, "", true, &consul.QueryOptions{})
-	if err != nil {
-		return err
-	}
-	if len(se) == 0 {
-		return fmt.Errorf("no Furan hosts found via Consul")
-	}
-	fc.logger.Printf("found %v Furan hosts", len(se))
-	for _, s := range se {
-		n := furanNode{
-			addr: s.Node.Address,
-			port: s.Service.Port,
+	if opts.UseConsul {
+		cc := consul.DefaultConfig()
+		if opts.ConsulAddr != "" {
+			cc.Address = opts.ConsulAddr
 		}
-		nodes = append(nodes, n)
+		c, err := consul.NewClient(cc)
+		if err != nil {
+			return err
+		}
+		qopts := &consul.QueryOptions{}
+		if opts.SelectionStrategy == NetworkProximity {
+			qopts.Near = "_agent"
+		}
+		fc.logger.Printf("connecting to Consul on %v", cc.Address)
+		se, _, err := c.Health().Service(opts.ServiceName, "", true, qopts)
+		if err != nil {
+			return err
+		}
+		if len(se) == 0 {
+			return fmt.Errorf("no Furan hosts found via Consul")
+		}
+		fc.logger.Printf("found %v Furan hosts", len(se))
+		for _, s := range se {
+			n := furanNode{
+				addr: s.Node.Address,
+				port: s.Service.Port,
+			}
+			nodes = append(nodes, n)
+		}
+	} else {
+		for _, s := range opts.NodeList {
+			ns := strings.Split(s, ":")
+			if len(ns) != 2 {
+				return fmt.Errorf("malformed node: %v", s)
+			}
+			p, err := strconv.Atoi(ns[1])
+			if err != nil {
+				return fmt.Errorf("malformed port: %v", s)
+			}
+			n := furanNode{
+				addr: ns[0],
+				port: p,
+			}
+			nodes = append(nodes, n)
+		}
 	}
-	i, err := randomRange(len(nodes) - 1) // Random node
-	if err != nil {
-		return err
+	if opts.SelectionStrategy == RandomNodeSelection {
+		i, err := randomRange(len(nodes) - 1) // Random node
+		if err != nil {
+			return err
+		}
+		fc.n = &nodes[i]
+	} else {
+		fc.n = &nodes[0]
 	}
-	fc.n = &nodes[i]
 	return nil
 }
 
