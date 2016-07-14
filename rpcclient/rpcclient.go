@@ -132,7 +132,7 @@ func (fc *FuranClient) init(opts *DiscoveryOptions) error {
 			nodes = append(nodes, n)
 		}
 	}
-	if opts.SelectionStrategy == RandomNodeSelection {
+	if opts.SelectionStrategy == RandomNodeSelection && len(nodes) > 1 {
 		i, err := randomRange(len(nodes) - 1) // Random node
 		if err != nil {
 			return err
