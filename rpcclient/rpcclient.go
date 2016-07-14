@@ -133,7 +133,7 @@ func (fc *FuranClient) init(opts *DiscoveryOptions) error {
 		}
 	}
 	if opts.SelectionStrategy == RandomNodeSelection && len(nodes) > 1 {
-		i, err := randomRange(len(nodes) - 1) // Random node
+		i, err := randomRange(len(nodes)) // Random node
 		if err != nil {
 			return err
 		}
@@ -141,6 +141,7 @@ func (fc *FuranClient) init(opts *DiscoveryOptions) error {
 	} else {
 		fc.n = &nodes[0]
 	}
+	fc.logger.Printf("using node %v", fc.n)
 	return nil
 }
 
