@@ -20,6 +20,8 @@ const (
 	keepaliveSecs      = 5
 )
 
+var kafkaVersion = sarama.V0_10_0_0
+
 type kafkaconfig struct {
 	brokers      []string
 	topic        string
@@ -70,7 +72,7 @@ type KafkaManager struct {
 // NewKafkaManager returns a new Kafka manager object
 func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.Logger) (*KafkaManager, error) {
 	pconf := sarama.NewConfig()
-	pconf.Version = sarama.V0_10_0_0
+	pconf.Version = kafkaVersion
 
 	pconf.Net.MaxOpenRequests = int(maxsends)
 	pconf.Net.DialTimeout = connTimeoutSecs * time.Second
@@ -88,6 +90,7 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.
 	}
 
 	cconf := cluster.NewConfig()
+	cconf.Version = pconf.Version
 	cconf.Net = pconf.Net
 	cconf.Consumer.Return.Errors = true
 
