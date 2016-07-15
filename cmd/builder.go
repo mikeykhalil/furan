@@ -83,7 +83,7 @@ func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetc
 func (ib *ImageBuilder) logf(ctx context.Context, msg string, params ...interface{}) {
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
-		log.Printf("build id missing from context")
+		ib.logger.Printf("build id missing from context")
 		return
 	}
 	msg = fmt.Sprintf("%v: %v", id.String(), msg)
@@ -91,12 +91,12 @@ func (ib *ImageBuilder) logf(ctx context.Context, msg string, params ...interfac
 	go func() {
 		event, err := ib.getBuildEvent(ctx, BuildEvent_LOG, BuildEventError_NO_ERROR, fmt.Sprintf(msg, params...), false)
 		if err != nil {
-			log.Printf("error building event object: %v", err)
+			ib.logger.Printf("error building event object: %v", err)
 			return
 		}
 		err = ib.ep.PublishEvent(event)
 		if err != nil {
-			log.Printf("error pushing event to bus: %v", err)
+			ib.logger.Printf("error pushing event to bus: %v", err)
 		}
 	}()
 }
@@ -127,10 +127,11 @@ func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
 	if err != nil {
 		return event, err
 	}
+	ib.logger.Printf("event: %v", msg)
 	go func() {
 		err := ib.ep.PublishEvent(event)
 		if err != nil {
-			log.Printf("error pushing event to bus: %v", err)
+			ib.logger.Printf("error pushing event to bus: %v", err)
 		}
 	}()
 	return event, nil
