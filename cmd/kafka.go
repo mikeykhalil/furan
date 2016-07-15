@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
 	"github.com/gocql/gocql"
 	"github.com/golang/protobuf/proto"
+)
+
+const (
+	maxFlushMsgs       = 5
+	maxFlushFreqSecs   = 1
+	connectTimeoutSecs = 10
+	keepaliveSecs      = 5
 )
 
 type kafkaconfig struct {
@@ -62,14 +70,26 @@ type KafkaManager struct {
 // NewKafkaManager returns a new Kafka manager object
 func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.Logger) (*KafkaManager, error) {
 	pconf := sarama.NewConfig()
+
 	pconf.Net.MaxOpenRequests = int(maxsends)
+	pconf.Net.DialTimeout = connTimeoutSecs * time.Second
+	pconf.Net.ReadTimeout = connTimeoutSecs * time.Second
+	pconf.Net.WriteTimeout = connTimeoutSecs * time.Second
+	pconf.Net.KeepAlive = keepaliveSecs * time.Second
+
 	pconf.Producer.Return.Errors = true
+	pconf.Producer.Flush.Messages = maxFlushMsgs
+	pconf.Producer.Flush.Frequency = maxFlushFreqSecs * time.Second
+
 	asyncp, err := sarama.NewAsyncProducer(brokers, pconf)
 	if err != nil {
 		return nil, err
 	}
+
 	cconf := cluster.NewConfig()
-	cconf.Net.MaxOpenRequests = int(maxsends)
+	cconf.Net = pconf.Net
+	cconf.Consumer.Return.Errors = true
+
 	kp := &KafkaManager{
 		ap:           asyncp,
 		topic:        topic,
@@ -77,11 +97,11 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.
 		consumerConf: cconf,
 		logger:       logger,
 	}
-	go kp.handleErrors()
+	go kp.handlePErrors()
 	return kp, nil
 }
 
-func (kp *KafkaManager) handleErrors() {
+func (kp *KafkaManager) handlePErrors() {
 	var kerr *sarama.ProducerError
 	for {
 		kerr = <-kp.ap.Errors()
@@ -132,7 +152,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *BuildEvent, done <-chan 
 			if err == nil { // chan closed
 				return
 			}
-			kp.logger.Printf("kafka consumer error: %v", err)
+			kp.logger.Printf("Kafka consumer error: %v", err)
 		}
 	}
 	go handleConsumerErrors()
