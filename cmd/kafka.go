@@ -70,6 +70,7 @@ type KafkaManager struct {
 // NewKafkaManager returns a new Kafka manager object
 func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.Logger) (*KafkaManager, error) {
 	pconf := sarama.NewConfig()
+	pconf.Version = sarama.V0_10_0_0
 
 	pconf.Net.MaxOpenRequests = int(maxsends)
 	pconf.Net.DialTimeout = connTimeoutSecs * time.Second
