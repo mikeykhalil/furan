@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	connTimeoutSecs = 10
+	connTimeoutSecs        = 10
+	pollStatusIntervalSecs = 5
 )
 
 var discoverFuranHost bool
@@ -137,6 +138,32 @@ func trigger(cmd *cobra.Command, args []string) {
 	if err != nil {
 		rpcerr(err, "MonitorBuild")
 	}
+
+	// In the event of a Kafka failure, instead of hanging indefinitely we concurrently
+	// poll for build status so we know when a build finishes/fails
+	ticker := time.NewTicker(pollStatusIntervalSecs * time.Second)
+	go func() {
+		sreq := BuildStatusRequest{
+			BuildId: resp.BuildId,
+		}
+		for {
+			select {
+			case <-ticker.C:
+				sresp, err := c.GetBuildStatus(context.Background(), &sreq)
+				if err != nil {
+					rpcerr(err, "GetBuildStatus")
+				}
+				log.Printf("build status: %v", sresp.State.String())
+				if sresp.Finished {
+					if sresp.Failed {
+						os.Exit(1)
+					}
+					os.Exit(0)
+				}
+			}
+		}
+	}()
+
 	for {
 		event, err := stream.Recv()
 		if err != nil {
