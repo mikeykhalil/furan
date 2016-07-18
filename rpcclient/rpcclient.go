@@ -42,7 +42,7 @@ type ImageBuildPusher interface {
 
 // FuranClient is an object which issues remote RPC calls to a Furan server
 type FuranClient struct {
-	n      *furanNode
+	n      furanNode
 	logger *log.Logger
 }
 
@@ -137,20 +137,23 @@ func (fc *FuranClient) init(opts *DiscoveryOptions) error {
 		if err != nil {
 			return err
 		}
-		fc.n = &nodes[i]
+		fc.n = nodes[i]
 	} else {
-		fc.n = &nodes[0]
+		fc.n = nodes[0]
 	}
-	fc.logger.Printf("using node %v", fc.n)
+	fc.logger.Printf("using node %v", fc.n.addr)
 	return nil
 }
 
-func (fc *FuranClient) validateBuildRequest(req *BuildRequest) error {
+func (fc FuranClient) validateBuildRequest(req *BuildRequest) error {
 	if req.Build.GithubRepo == "" {
 		return fmt.Errorf("Build.GithubRepo is required")
 	}
 	if req.Build.Ref == "" {
 		return fmt.Errorf("Build.Ref is required")
+	}
+	if len(req.Build.Tags) == 0 {
+		return fmt.Errorf("at least one tag is required") // no tags causes datalayer failure
 	}
 	if req.Push.Registry.Repo == "" &&
 		req.Push.S3.Region == "" &&
@@ -161,7 +164,7 @@ func (fc *FuranClient) validateBuildRequest(req *BuildRequest) error {
 	return nil
 }
 
-func (fc *FuranClient) rpcerr(err error, msg string, params ...interface{}) error {
+func (fc FuranClient) rpcerr(err error, msg string, params ...interface{}) error {
 	code := grpc.Code(err)
 	msg = fmt.Sprintf(msg, params...)
 	return fmt.Errorf("rpc error: %v: %v: %v", msg, code.String(), err)
@@ -170,7 +173,7 @@ func (fc *FuranClient) rpcerr(err error, msg string, params ...interface{}) erro
 // Build starts and monitors a build synchronously, sending BuildEvents to out.
 // Returns an error if there was an RPC error or if the build/push fails
 // You must read from out (or provide a sufficiently buffered channel) to prevent Build from blocking forever
-func (fc *FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *BuildRequest) (string, error) {
+func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *BuildRequest) (string, error) {
 	err := fc.validateBuildRequest(req)
 	if err != nil {
 		return "", err
@@ -184,7 +187,7 @@ func (fc *FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Bui
 	if err != nil {
 		return "", fmt.Errorf("error connecting to remote host: %v", err)
 	}
-	defer conn.Close()
+	//defer conn.Close()
 
 	c := NewFuranExecutorClient(conn)
 
@@ -199,7 +202,7 @@ func (fc *FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Bui
 	}
 
 	fc.logger.Printf("monitoring build: %v", resp.BuildId)
-	stream, err := c.MonitorBuild(ctx, &mreq) // only pass through ctx to monitor call so user can cancel
+	stream, err := c.MonitorBuild(context.Background(), &mreq)
 	if err != nil {
 		return resp.BuildId, fc.rpcerr(err, "MonitorBuild")
 	}
