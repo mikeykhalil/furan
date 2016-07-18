@@ -185,9 +185,8 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		return BuildStatusResponse_PUSH_FAILURE
 	}
 	err = gr.ib.CleanImage(ctx, imageid)
-	if err != nil {
-		err = fmt.Errorf("error cleaning built image: %v", err)
-		return BuildStatusResponse_PUSH_FAILURE
+	if err != nil { // Cleaning images is non-fatal because concurrent builds can cause failures here
+		gr.logger.Printf("CleanImage error (non-fatal): %v", err)
 	}
 	err = gr.dl.SetBuildState(id, BuildStatusResponse_SUCCESS)
 	if err != nil {
