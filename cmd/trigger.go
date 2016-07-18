@@ -88,7 +88,7 @@ func getFuranServerFromConsul(svc string) (*furanNode, error) {
 		}
 		nodes = append(nodes, n)
 	}
-	i, err := randomRange(len(nodes) - 1) // Random node
+	i, err := randomRange(len(nodes)) // Random node
 	if err != nil {
 		return nil, err
 	}
