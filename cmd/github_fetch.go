@@ -12,9 +12,15 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/github"
+	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
+)
+
+const (
+	githubDownloadTimeoutSecs = 300
 )
 
 // CodeFetcher represents an object capable of fetching code and returning a
@@ -48,15 +54,21 @@ func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.
 	if err != nil {
 		return nil, err
 	}
-	return gf.getArchive(url)
+	ctx, _ := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	tb, err := gf.getArchive(ctx, url)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("download timeout exceeded: %v secs", githubDownloadTimeoutSecs)
+	}
+	return tb, err
 }
 
-func (gf *GitHubFetcher) getArchive(archiveURL *url.URL) (io.Reader, error) {
+func (gf *GitHubFetcher) getArchive(ctx context.Context, archiveURL *url.URL) (io.Reader, error) {
 	hc := http.Client{}
 	hr, err := http.NewRequest("GET", archiveURL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating http request: %v", err)
 	}
+	hr.Cancel = ctx.Done()
 	resp, err := hc.Do(hr)
 	if err != nil {
 		return nil, fmt.Errorf("error performing archive http request: %v", err)
