@@ -89,12 +89,15 @@ func startgRPC() {
 	if err != nil {
 		log.Fatalf("error creating Docker client: %v", err)
 	}
-	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, dockerConfig.dockercfgContents, logger)
+	mc, err := NewDatadogCollector(dogstatsdAddr)
+	if err != nil {
+		log.Fatalf("error creating Datadog collector: %v", err)
+	}
+	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}
-
-	grpcSvr = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, serverConfig.queuesize, serverConfig.concurrency, logger)
+	grpcSvr = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, mc, serverConfig.queuesize, serverConfig.concurrency, logger)
 	go grpcSvr.ListenRPC(serverConfig.grpcAddr, serverConfig.grpcPort)
 }
 

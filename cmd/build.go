@@ -92,14 +92,19 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("error creating Docker client: %v", err)
 	}
 
-	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, dockerConfig.dockercfgContents, logger)
+	mc, err := NewDatadogCollector(dogstatsdAddr)
+	if err != nil {
+		log.Fatalf("error creating Datadog collector: %v", err)
+	}
+
+	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}
 
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, 1, 1, logger)
+	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, mc, 1, 1, logger)
 
 	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
 	if err != nil {

@@ -64,17 +64,19 @@ type ImageBuilder struct {
 	gf        CodeFetcher
 	ep        EventBusProducer
 	dl        DataLayer
+	mc        MetricsCollector
 	dockercfg map[string]dtypes.AuthConfig
 	logger    *log.Logger
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, dcfg map[string]dtypes.AuthConfig, logger *log.Logger) (*ImageBuilder, error) {
+func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, dcfg map[string]dtypes.AuthConfig, logger *log.Logger) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	ib.gf = gf
 	ib.c = dc
 	ib.ep = eventbus
 	ib.dl = datalayer
+	ib.mc = mc
 	ib.dockercfg = dcfg
 	ib.logger = logger
 	return ib, nil
@@ -258,10 +260,10 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	if err != nil {
 		return imageid, err
 	}
-	return imageid, ib.writeDockerImageSizeMetrics(ctx, imageid)
+	return imageid, ib.writeDockerImageSizeMetrics(ctx, imageid, req.Build.GithubRepo, req.Build.Ref)
 }
 
-func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid string) error {
+func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid string, repo string, ref string) error {
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
@@ -272,6 +274,10 @@ func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid
 	res, _, err := ib.c.ImageInspectWithRaw(ctx, imageid, true)
 	if err != nil {
 		return err
+	}
+	err = ib.mc.ImageSize(res.Size, res.VirtualSize, repo, ref)
+	if err != nil {
+		ib.logger.Printf("error pushing image size metrics: %v", err)
 	}
 	return ib.dl.SetDockerImageSizesMetric(id, res.Size, res.VirtualSize)
 }
