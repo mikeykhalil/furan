@@ -83,15 +83,11 @@ func healthcheck() {
 	logger.Println(server.ListenAndServe())
 }
 
-func startgRPC() {
+func startgRPC(mc MetricsCollector) {
 	gf := NewGitHubFetcher(gitConfig.token)
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		log.Fatalf("error creating Docker client: %v", err)
-	}
-	mc, err := NewDatadogCollector(dogstatsdAddr)
-	if err != nil {
-		log.Fatalf("error creating Datadog collector: %v", err)
 	}
 	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, dockerConfig.dockercfgContents, logger)
 	if err != nil {
@@ -108,15 +104,19 @@ func server(cmd *cobra.Command, args []string) {
 	}
 	setupServerLogger()
 	setupDB(initializeDB)
-	setupKafka()
+	mc, err := NewDatadogCollector(dogstatsdAddr)
+	if err != nil {
+		log.Fatalf("error creating Datadog collector: %v", err)
+	}
+	setupKafka(mc)
 	certPath, keyPath := writeTLSCert()
 	defer rmTempFiles(certPath, keyPath)
-	err := getDockercfg()
+	err = getDockercfg()
 	if err != nil {
 		logger.Fatalf("error reading dockercfg: %v", err)
 	}
 
-	startgRPC()
+	startgRPC(mc)
 	go healthcheck()
 
 	r := mux.NewRouter()

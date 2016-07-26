@@ -17,6 +17,8 @@ type MetricsCollector interface {
 	BuildStarted(string, string) error
 	BuildFailed(string, string) error
 	BuildSucceeded(string, string) error
+	KafkaProducerFailure() error
+	KafkaConsumerFailure() error
 }
 
 // DatadogCollector represents a collector that pushes metrics to Datadog
@@ -71,4 +73,14 @@ func (dc *DatadogCollector) BuildFailed(repo, ref string) error {
 // BuildSucceeded increments the counter for each build that succeeds
 func (dc *DatadogCollector) BuildSucceeded(repo, ref string) error {
 	return dc.c.Count("build.succeeded", 1, dc.tags(repo, ref), 1)
+}
+
+// KafkaProducerFailure increments the counter for a Kafka publish failure
+func (dc *DatadogCollector) KafkaProducerFailure() error {
+	return dc.c.Count("kafka.producer.failure", 1, nil, 1)
+}
+
+// KafkaConsumerFailure increments the counter for a Kafka read failure
+func (dc *DatadogCollector) KafkaConsumerFailure() error {
+	return dc.c.Count("kafka.consumer.failure", 1, nil, 1)
 }

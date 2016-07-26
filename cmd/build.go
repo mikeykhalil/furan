@@ -72,8 +72,12 @@ func build(cmd *cobra.Command, args []string) {
 	validateCLIBuildRequest()
 	setupVault()
 	setupDB(initializeDB)
-	setupKafka()
-	err := getDockercfg()
+	mc, err := NewDatadogCollector(dogstatsdAddr)
+	if err != nil {
+		log.Fatalf("error creating Datadog collector: %v", err)
+	}
+	setupKafka(mc)
+	err = getDockercfg()
 	if err != nil {
 		clierr("Error getting dockercfg: %v", err)
 	}
@@ -90,11 +94,6 @@ func build(cmd *cobra.Command, args []string) {
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		clierr("error creating Docker client: %v", err)
-	}
-
-	mc, err := NewDatadogCollector(dogstatsdAddr)
-	if err != nil {
-		log.Fatalf("error creating Datadog collector: %v", err)
 	}
 
 	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, dockerConfig.dockercfgContents, logger)

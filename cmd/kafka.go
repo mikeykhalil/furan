@@ -29,7 +29,7 @@ type kafkaconfig struct {
 	maxOpenSends uint
 }
 
-func setupKafka() {
+func setupKafka(mc MetricsCollector) {
 	kafkaConfig.brokers = strings.Split(kafkaBrokerStr, ",")
 	if len(kafkaConfig.brokers) < 1 {
 		log.Fatalf("At least one Kafka broker is required")
@@ -37,7 +37,7 @@ func setupKafka() {
 	if kafkaConfig.topic == "" {
 		log.Fatalf("Kafka topic is required")
 	}
-	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends, logger)
+	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends, mc, logger)
 	if err != nil {
 		log.Fatalf("Error creating Kafka producer: %v", err)
 	}
@@ -66,11 +66,12 @@ type KafkaManager struct {
 	topic        string
 	brokers      []string
 	consumerConf *cluster.Config
+	mc           MetricsCollector
 	logger       *log.Logger
 }
 
 // NewKafkaManager returns a new Kafka manager object
-func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.Logger) (*KafkaManager, error) {
+func NewKafkaManager(brokers []string, topic string, maxsends uint, mc MetricsCollector, logger *log.Logger) (*KafkaManager, error) {
 	pconf := sarama.NewConfig()
 	pconf.Version = kafkaVersion
 
@@ -99,6 +100,7 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint, logger *log.
 		topic:        topic,
 		brokers:      kafkaConfig.brokers,
 		consumerConf: cconf,
+		mc:           mc,
 		logger:       logger,
 	}
 	go kp.handlePErrors()
@@ -110,6 +112,7 @@ func (kp *KafkaManager) handlePErrors() {
 	for {
 		kerr = <-kp.ap.Errors()
 		log.Printf("Kafka producer error: %v", kerr)
+		kp.mc.KafkaProducerFailure()
 	}
 }
 
@@ -132,6 +135,7 @@ func (kp *KafkaManager) PublishEvent(event *BuildEvent) error {
 	case kp.ap.Input() <- pmsg:
 		return nil
 	default:
+		kp.mc.KafkaProducerFailure()
 		return fmt.Errorf("could not publish Kafka message: channel full")
 	}
 }
@@ -156,6 +160,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *BuildEvent, done <-chan 
 			if err == nil { // chan closed
 				return
 			}
+			kp.mc.KafkaConsumerFailure()
 			kp.logger.Printf("Kafka consumer error: %v", err)
 		}
 	}
