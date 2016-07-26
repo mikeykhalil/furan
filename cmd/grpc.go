@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/gocql/gocql"
 
@@ -13,12 +14,14 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// GrpcServer represents an object that responds to gRPC calls
 type GrpcServer struct {
 	ib         ImageBuildPusher
 	dl         DataLayer
 	ep         EventBusProducer
 	ec         EventBusConsumer
 	ls         io.Writer
+	mc         MetricsCollector
 	logger     *log.Logger
 	workerChan chan *workerRequest
 	qsize      uint
@@ -32,13 +35,22 @@ type workerRequest struct {
 	req *BuildRequest
 }
 
-type ctxIDKeyType string
+type ctxKeyType string
 
-var ctxIDKey ctxIDKeyType = "id"
+var ctxIDKey ctxKeyType = "id"
+var ctxStartedKey ctxKeyType = "started"
+var ctxPushStartedkey ctxKeyType = "push_started"
 
-// NewBuildIDContext returns a context with the current build ID stored as a value
+// NewBuildIDContext returns a context with the current build ID and time started
+// stored as values
 func NewBuildIDContext(ctx context.Context, id gocql.UUID) context.Context {
-	return context.WithValue(ctx, ctxIDKey, id)
+	return context.WithValue(context.WithValue(ctx, ctxIDKey, id), ctxStartedKey, time.Now().UTC())
+}
+
+// NewPushStartedContext returns a context with the push started timestamp stored
+// as a value
+func NewPushStartedContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxPushStartedkey, time.Now().UTC())
 }
 
 // BuildIDFromContext returns the ID stored in ctx, if any
@@ -47,13 +59,26 @@ func BuildIDFromContext(ctx context.Context) (gocql.UUID, bool) {
 	return id, ok
 }
 
+// StartedFromContext returns the time the build started stored in ctx, if any
+func StartedFromContext(ctx context.Context) (time.Time, bool) {
+	started, ok := ctx.Value(ctxStartedKey).(time.Time)
+	return started, ok
+}
+
+// PushStartedFromContext returns the time the push started stored in ctx, if any
+func PushStartedFromContext(ctx context.Context) (time.Time, bool) {
+	ps, ok := ctx.Value(ctxPushStartedkey).(time.Time)
+	return ps, ok
+}
+
 // NewGRPCServer returns a new instance of the gRPC server
-func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec EventBusConsumer, queuesize uint, concurrency uint, logger *log.Logger) *GrpcServer {
+func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec EventBusConsumer, mc MetricsCollector, queuesize uint, concurrency uint, logger *log.Logger) *GrpcServer {
 	grs := &GrpcServer{
 		ib:         ib,
 		dl:         dl,
 		ep:         ep,
 		ec:         ec,
+		mc:         mc,
 		logger:     logger,
 		workerChan: make(chan *workerRequest, queuesize),
 		qsize:      queuesize,
@@ -106,6 +131,45 @@ func (gr *GrpcServer) logf(msg string, params ...interface{}) {
 	gr.logger.Printf(msg, params...)
 }
 
+func (gr *GrpcServer) durationFromStarted(ctx context.Context) (time.Duration, error) {
+	started, ok := StartedFromContext(ctx)
+	if !ok {
+		return 0, fmt.Errorf("started missing from context")
+	}
+	return time.Now().UTC().Sub(started), nil
+}
+
+func (gr *GrpcServer) buildDuration(ctx context.Context, req *BuildRequest) error {
+	d, err := gr.durationFromStarted(ctx)
+	if err != nil {
+		return err
+	}
+	return gr.mc.Duration("build.duration", req.Build.GithubRepo, req.Build.Ref, nil, d.Seconds())
+}
+
+func (gr *GrpcServer) pushDuration(ctx context.Context, req *BuildRequest, s3 bool) error {
+	ps, ok := PushStartedFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("push_started missing from context")
+	}
+	tags := []string{}
+	if s3 {
+		tags = append(tags, "s3")
+	} else {
+		tags = append(tags, "registry")
+	}
+	d := time.Now().UTC().Sub(ps).Seconds()
+	return gr.mc.Duration("push.duration", req.Build.GithubRepo, req.Build.Ref, tags, d)
+}
+
+func (gr *GrpcServer) totalDuration(ctx context.Context, req *BuildRequest) error {
+	d, err := gr.durationFromStarted(ctx)
+	if err != nil {
+		return err
+	}
+	return gr.mc.Duration("total.duration", req.Build.GithubRepo, req.Build.Ref, nil, d.Seconds())
+}
+
 // Performs build synchronously
 func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome BuildStatusResponse_BuildState) {
 	var err error // so deferred finalize function has access to any error
@@ -125,8 +189,13 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		var eet BuildEventError_ErrorType
 		if failed {
 			eet = BuildEventError_FATAL
+			gr.mc.BuildFailed(req.Build.GithubRepo, req.Build.Ref)
 		} else {
 			eet = BuildEventError_NO_ERROR
+			gr.mc.BuildSucceeded(req.Build.GithubRepo, req.Build.Ref)
+		}
+		if err := gr.totalDuration(ctx, req); err != nil {
+			gr.logger.Printf("error pushing total duration: %v", err)
 		}
 		var msg string
 		if err != nil {
@@ -156,6 +225,10 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		}
 		gr.logf("%v: %v: failed: %v", id.String(), msg, flags["failed"])
 	}(id)
+	err = gr.mc.BuildStarted(req.Build.GithubRepo, req.Build.Ref)
+	if err != nil {
+		gr.logger.Printf("error pushing BuildStarted metric: %v", err)
+	}
 	if isCancelled(ctx.Done()) {
 		err = fmt.Errorf("build was cancelled")
 		return BuildStatusResponse_BUILD_FAILURE
@@ -166,6 +239,9 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		return BuildStatusResponse_BUILD_FAILURE
 	}
 	imageid, err := gr.ib.Build(ctx, req, id)
+	if err := gr.buildDuration(ctx, req); err != nil {
+		gr.logger.Printf("error pushing build duration metric: %v", err)
+	}
 	if err != nil {
 		err = fmt.Errorf("error performing build: %v", err)
 		return BuildStatusResponse_BUILD_FAILURE
@@ -175,10 +251,15 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 		err = fmt.Errorf("error setting build state to pushing: %v", err)
 		return BuildStatusResponse_BUILD_FAILURE
 	}
-	if req.Push.Registry.Repo == "" {
+	ctx = NewPushStartedContext(ctx)
+	s3 := req.Push.Registry.Repo == ""
+	if s3 {
 		err = gr.ib.PushBuildToS3(ctx, req)
 	} else {
 		err = gr.ib.PushBuildToRegistry(ctx, req)
+	}
+	if err := gr.pushDuration(ctx, req, s3); err != nil {
+		gr.logger.Printf("error pushing push duration metric: %v", err)
 	}
 	if err != nil {
 		err = fmt.Errorf("error pushing: %v", err)
