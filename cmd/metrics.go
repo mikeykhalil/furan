@@ -38,7 +38,7 @@ func NewDatadogCollector(addr string) (*DatadogCollector, error) {
 
 func (dc *DatadogCollector) tags(repo, ref string) []string {
 	return []string{
-		repo,
+		fmt.Sprintf("repo:%v", repo),
 		fmt.Sprintf("ref:%v", ref),
 	}
 }
