@@ -89,6 +89,7 @@ func build(cmd *cobra.Command, args []string) {
 	defer dnull.Close()
 
 	logger = log.New(dnull, "", log.LstdFlags)
+	clogger := log.New(os.Stderr, "", log.LstdFlags)
 
 	gf := NewGitHubFetcher(gitConfig.token)
 	dc, err := docker.NewEnvClient()
@@ -96,8 +97,9 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("error creating Docker client: %v", err)
 	}
 
-	osm := NewS3StorageManager(awsConfig, mc, logger)
-	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, dockerConfig.dockercfgContents, logger)
+	osm := NewS3StorageManager(awsConfig, mc, clogger)
+	is := NewDockerImageSquasher(clogger)
+	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}

@@ -73,6 +73,7 @@ type SquashInfo struct {
 	InputBytes        uint64
 	OutputBytes       uint64
 	SizeDifference    int64
+	SizePctDifference float64
 	FilesRemovedCount uint
 	FilesRemoved      []WhiteoutFile
 	LayersRemoved     uint
@@ -171,6 +172,14 @@ func (dis *DockerImageSquasher) Squash(ctx context.Context, input io.Reader, out
 	sinfo.OutputBytes = uint64(sz)
 	sinfo.SizeDifference = int64(sinfo.OutputBytes - sinfo.InputBytes)
 	sinfo.FilesRemovedCount = uint(len(sinfo.FilesRemoved))
+
+	var diffabs uint64
+	if sinfo.SizeDifference < 0 {
+		diffabs = uint64(-sinfo.SizeDifference)
+	} else {
+		diffabs = uint64(sinfo.SizeDifference)
+	}
+	sinfo.SizePctDifference = (float64(diffabs) / float64(sinfo.InputBytes)) * 100
 
 	dis.logf("squashing complete")
 

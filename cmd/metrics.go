@@ -14,6 +14,7 @@ const (
 type MetricsCollector interface {
 	Duration(string, string, string, []string, float64) error
 	Size(string, string, string, []string, int64) error
+	Float(string, string, string, []string, float64) error
 	ImageSize(int64, int64, string, string) error
 	BuildStarted(string, string) error
 	BuildFailed(string, string) error
@@ -54,6 +55,11 @@ func (dc *DatadogCollector) Duration(name string, repo string, ref string, tags 
 // Size pushes sz (bytes) to the metric name to dogstatsd
 func (dc *DatadogCollector) Size(name string, repo string, ref string, tags []string, sz int64) error {
 	return dc.c.Histogram(name, float64(sz), append(dc.tags(repo, ref), tags...), 1)
+}
+
+// Float pushes val to the metric name to dogstatsd
+func (dc *DatadogCollector) Float(name string, repo string, ref string, tags []string, val float64) error {
+	return dc.c.Histogram(name, val, append(dc.tags(repo, ref), tags...), 1)
 }
 
 // ImageSize pushes sz (total size in bytes) and vxz (virtual size in bytes) to dogstatsd
