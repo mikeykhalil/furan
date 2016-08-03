@@ -96,7 +96,8 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("error creating Docker client: %v", err)
 	}
 
-	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, dockerConfig.dockercfgContents, logger)
+	osm := NewS3StorageManager(awsConfig, mc, logger)
+	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}

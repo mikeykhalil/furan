@@ -89,7 +89,8 @@ func startgRPC(mc MetricsCollector) {
 	if err != nil {
 		log.Fatalf("error creating Docker client: %v", err)
 	}
-	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, dockerConfig.dockercfgContents, logger)
+	osm := NewS3StorageManager(awsConfig, mc, logger)
+	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, dockerConfig.dockercfgContents, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}

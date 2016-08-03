@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -25,9 +26,8 @@ type AWSConfig struct {
 
 // ImageDescription contains all info needed to find a specific image within the object store
 type ImageDescription struct {
-	Owner     string
-	Repo      string
-	CommitSHA string
+	GitHubRepo string
+	CommitSHA  string
 }
 
 // ObjectStorageManger describes an object capable of pushing/pulling images from
@@ -48,15 +48,17 @@ type S3Options struct {
 type S3StorageManager struct {
 	config        *AWSConfig
 	creds         *credentials.Credentials
+	mc            MetricsCollector
 	awsLoggerFunc aws.Logger
 	logger        *log.Logger
 }
 
 // NewS3StorageManager returns a new S3 manager
-func NewS3StorageManager(config AWSConfig, logger *log.Logger) *S3StorageManager {
+func NewS3StorageManager(config AWSConfig, mc MetricsCollector, logger *log.Logger) *S3StorageManager {
 	smm := &S3StorageManager{
 		creds:  credentials.NewStaticCredentials(config.AccessKeyID, config.SecretAccessKey, ""),
 		config: &config,
+		mc:     mc,
 		logger: logger,
 	}
 	smm.awsLoggerFunc = aws.LoggerFunc(func(args ...interface{}) { smm.logf("s3: %v", args...) })
@@ -68,7 +70,7 @@ func (sm *S3StorageManager) logf(msg string, params ...interface{}) {
 }
 
 func (sm S3StorageManager) getPath(kp string, desc ImageDescription) string {
-	return fmt.Sprintf("%v%v/%v/%v.tar.gz", kp, desc.Owner, desc.Repo, desc.CommitSHA)
+	return fmt.Sprintf("%v%v/%v.tar.gz", kp, desc.GitHubRepo, desc.CommitSHA)
 }
 
 func (sm S3StorageManager) getOpts(opts interface{}) (*S3Options, error) {
@@ -87,6 +89,7 @@ func (sm S3StorageManager) getSession(region string) *session.Session {
 
 // Push reads an image from in and pushes it to S3
 func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts interface{}) error {
+	started := time.Now().UTC()
 	s3opts, err := sm.getOpts(opts)
 	if err != nil {
 		return err
@@ -107,6 +110,8 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 	if err != nil {
 		return err
 	}
+	d := time.Now().UTC().Sub(started).Seconds()
+	sm.mc.Duration("s3.push.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
 	sm.logf("S3 push location: %v", uo.Location)
 	sm.logf("S3 version ID: %v", uo.VersionID)
 	sm.logf("S3 upload ID: %v", uo.UploadID)
@@ -115,6 +120,7 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 
 // Pull downloads an image from S3 and writes it to out
 func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts interface{}) error {
+	started := time.Now().UTC()
 	s3opts, err := sm.getOpts(opts)
 	if err != nil {
 		return err
@@ -132,6 +138,8 @@ func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts in
 	if err != nil {
 		return err
 	}
+	duration := time.Now().UTC().Sub(started).Seconds()
+	sm.mc.Duration("s3.pull.duration", desc.GitHubRepo, desc.CommitSHA, nil, duration)
 	sm.logf("S3 bytes read: %v", n)
 	return nil
 }

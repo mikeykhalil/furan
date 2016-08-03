@@ -25,6 +25,7 @@ const (
 // CodeFetcher represents an object capable of fetching code and returning a
 // gzip-compressed tarball io.Reader
 type CodeFetcher interface {
+	GetCommitSHA(string, string, string) (string, error)
 	Get(string, string, string) (io.Reader, error)
 }
 
@@ -41,6 +42,12 @@ func NewGitHubFetcher(token string) *GitHubFetcher {
 		c: github.NewClient(tc),
 	}
 	return gf
+}
+
+// GetCommitSHA returns the commit SHA for a reference
+func (gf *GitHubFetcher) GetCommitSHA(owner string, repo string, ref string) (string, error) {
+	csha, _, err := gf.c.Repositories.GetCommitSHA1(owner, repo, ref, "")
+	return csha, err
 }
 
 // Get fetches contents of GitHub repo and returns the processed contents as

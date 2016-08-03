@@ -41,13 +41,14 @@ type RepoBuildData struct {
 	Tags           []string //{name}:{tag}
 }
 
-// ImageBuildClient describes a client that can build & push images
+// ImageBuildClient describes a client that can manipulate images
 // Add whatever Docker API methods we care about here
 type ImageBuildClient interface {
 	ImageBuild(context.Context, io.Reader, dtypes.ImageBuildOptions) (dtypes.ImageBuildResponse, error)
 	ImageInspectWithRaw(context.Context, string, bool) (dtypes.ImageInspect, []byte, error)
 	ImageRemove(context.Context, string, dtypes.ImageRemoveOptions) ([]dtypes.ImageDelete, error)
 	ImagePush(context.Context, string, dtypes.ImagePushOptions) (io.ReadCloser, error)
+	ImageSave(context.Context, []string) (io.ReadCloser, error)
 }
 
 // ImageBuildPusher describes an object that can build and push container images
@@ -55,7 +56,7 @@ type ImageBuildPusher interface {
 	Build(context.Context, *BuildRequest, gocql.UUID) (string, error)
 	CleanImage(context.Context, string) error
 	PushBuildToRegistry(context.Context, *BuildRequest) error
-	PushBuildToS3(context.Context, *BuildRequest) error
+	PushBuildToS3(context.Context, string, *BuildRequest) error
 }
 
 // ImageBuilder is an object that builds and pushes images
@@ -65,18 +66,20 @@ type ImageBuilder struct {
 	ep        EventBusProducer
 	dl        DataLayer
 	mc        MetricsCollector
+	osm       ObjectStorageManger
 	dockercfg map[string]dtypes.AuthConfig
 	logger    *log.Logger
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, dcfg map[string]dtypes.AuthConfig, logger *log.Logger) (*ImageBuilder, error) {
+func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, osm ObjectStorageManger, dcfg map[string]dtypes.AuthConfig, logger *log.Logger) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	ib.gf = gf
 	ib.c = dc
 	ib.ep = eventbus
 	ib.dl = datalayer
 	ib.mc = mc
+	ib.osm = osm
 	ib.dockercfg = dcfg
 	ib.logger = logger
 	return ib, nil
@@ -435,9 +438,30 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 }
 
 // PushBuildToS3 exports and uploads the already built image to the configured S3 bucket/key
-func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, req *BuildRequest) error {
+func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *BuildRequest) error {
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
-	return fmt.Errorf("not yet implemented")
+	rl := strings.Split(req.Build.GithubRepo, "/")
+	if len(rl) != 2 {
+		return fmt.Errorf("malformed GitHub repo: %v", req.Build.GithubRepo)
+	}
+	csha, err := ib.gf.GetCommitSHA(rl[0], rl[1], req.Build.Ref)
+	if err != nil {
+		return fmt.Errorf("error getting commit SHA: %v", err)
+	}
+	r, err := ib.c.ImageSave(ctx, []string{imageid})
+	if err != nil {
+		return fmt.Errorf("error saving image: %v", err)
+	}
+	idesc := ImageDescription{
+		GitHubRepo: req.Build.GithubRepo,
+		CommitSHA:  csha,
+	}
+	opts := &S3Options{
+		Region:    req.Push.S3.Region,
+		Bucket:    req.Push.S3.Bucket,
+		KeyPrefix: req.Push.S3.KeyPrefix,
+	}
+	return ib.osm.Push(idesc, r, opts)
 }

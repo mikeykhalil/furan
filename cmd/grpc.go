@@ -254,7 +254,7 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *BuildRequest) (outcome
 	ctx = NewPushStartedContext(ctx)
 	s3 := req.Push.Registry.Repo == ""
 	if s3 {
-		err = gr.ib.PushBuildToS3(ctx, req)
+		err = gr.ib.PushBuildToS3(ctx, imageid, req)
 	} else {
 		err = gr.ib.PushBuildToRegistry(ctx, req)
 	}
