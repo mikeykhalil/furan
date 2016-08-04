@@ -35,6 +35,7 @@ type ImageDescription struct {
 type ObjectStorageManger interface {
 	Push(ImageDescription, io.Reader, interface{}) error
 	Pull(ImageDescription, io.WriterAt, interface{}) error
+	Size(ImageDescription, interface{}) (int64, error)
 }
 
 // S3Options contains the information needed to push/pull an image from S3
@@ -69,10 +70,6 @@ func (sm *S3StorageManager) logf(msg string, params ...interface{}) {
 	sm.logger.Printf(msg+"\n", params...)
 }
 
-func (sm S3StorageManager) getPath(kp string, desc ImageDescription) string {
-	return fmt.Sprintf("%v%v/%v.tar.gz", kp, desc.GitHubRepo, desc.CommitSHA)
-}
-
 func (sm S3StorageManager) getOpts(opts interface{}) (*S3Options, error) {
 	switch v := opts.(type) {
 	case *S3Options:
@@ -99,7 +96,7 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 		u.Concurrency = int(sm.config.Concurrency)
 	})
 	ct := "application/gzip"
-	k := sm.getPath(s3opts.KeyPrefix, desc)
+	k := generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
 	ui := &s3manager.UploadInput{
 		ContentType: &ct,
 		Bucket:      &s3opts.Bucket,
@@ -129,7 +126,7 @@ func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts in
 	d := s3manager.NewDownloaderWithClient(s3.New(sess), func(d *s3manager.Downloader) {
 		d.Concurrency = int(sm.config.Concurrency)
 	})
-	k := sm.getPath(s3opts.KeyPrefix, desc)
+	k := generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
 	di := &s3.GetObjectInput{
 		Bucket: &s3opts.Bucket,
 		Key:    &k,
@@ -142,4 +139,37 @@ func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts in
 	sm.mc.Duration("s3.pull.duration", desc.GitHubRepo, desc.CommitSHA, nil, duration)
 	sm.logf("S3 bytes read: %v", n)
 	return nil
+}
+
+func generateS3KeyName(keypfx string, repo string, commitsha string) string {
+	return fmt.Sprintf("%v%v/%v.tar.gz", keypfx, repo, commitsha)
+}
+
+// Size returns the size in bytes of the object in S3 if found or error
+func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64, error) {
+	s3opts, err := sm.getOpts(opts)
+	if err != nil {
+		return 0, err
+	}
+	sess := sm.getSession(s3opts.Region)
+	c := s3.New(sess)
+
+	kn := generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
+	in := &s3.ListObjectsV2Input{
+		Bucket:  &s3opts.Bucket,
+		MaxKeys: aws.Int64(1),
+		Prefix:  &kn,
+	}
+	resp, err := c.ListObjectsV2(in)
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.Contents) != 1 {
+		return 0, fmt.Errorf("unexpected response length from S3 API: %v (%v)", len(resp.Contents), resp.Contents)
+	}
+	sz := resp.Contents[0].Size
+	if sz == nil {
+		return 0, fmt.Errorf("sz is nil")
+	}
+	return *sz, nil
 }
