@@ -24,6 +24,10 @@ const (
 	Push                    // Push is a registry push
 )
 
+const (
+	legalDockerTagChars = "abcdefghijklmnopqrtsuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
+
 func buildEventTypeFromActionType(atype actionType) BuildEvent_EventType {
 	switch atype {
 	case Build:
@@ -144,6 +148,18 @@ func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
 	return event, nil
 }
 
+func (ib ImageBuilder) filterTagName(tag string) string {
+	mf := func(r rune) rune {
+		switch {
+		case strings.Contains(legalDockerTagChars, string(r)):
+			return r
+		default:
+			return '-'
+		}
+	}
+	return strings.Map(mf, tag)
+}
+
 // Returns full docker name:tag strings from the supplied repo/tags
 func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 	var bname string
@@ -154,7 +170,7 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 		bname = req.Build.GithubRepo
 	}
 	for _, t := range req.Build.Tags {
-		names = append(names, fmt.Sprintf("%v:%v", bname, t))
+		names = append(names, fmt.Sprintf("%v:%v", bname, ib.filterTagName(t)))
 	}
 	return names
 }
