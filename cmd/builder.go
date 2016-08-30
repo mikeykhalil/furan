@@ -25,7 +25,7 @@ const (
 )
 
 const (
-	legalDockerTagChars = "abcdefghijklmnopqrtsuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	legalDockerTagChars = "abcdefghijklmnopqrtsuvwxyz-_.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
 func buildEventTypeFromActionType(atype actionType) BuildEvent_EventType {
@@ -150,18 +150,28 @@ func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
 
 func (ib ImageBuilder) filterTagName(tag string) string {
 	mf := func(r rune) rune {
-		switch {
-		case strings.Contains(legalDockerTagChars, string(r)):
+		if strings.Contains(legalDockerTagChars, string(r)) {
 			return r
-		default:
-			return '-'
 		}
+		return rune(-1)
 	}
 	return strings.Map(mf, tag)
 }
 
+func (ib ImageBuilder) validateTag(tag string) bool {
+	switch {
+	case strings.HasPrefix(tag, "."):
+		return false
+	case strings.HasPrefix(tag, "-"):
+		return false
+	case len(tag) > 128:
+		return false
+	}
+	return true
+}
+
 // Returns full docker name:tag strings from the supplied repo/tags
-func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
+func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) ([]string, error) {
 	var bname string
 	names := []string{}
 	if req.Push.Registry.Repo != "" {
@@ -170,9 +180,18 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) []string {
 		bname = req.Build.GithubRepo
 	}
 	for _, t := range req.Build.Tags {
-		names = append(names, fmt.Sprintf("%v:%v", bname, ib.filterTagName(t)))
+		ft := ib.filterTagName(t)
+		if ft != t {
+			// if any illegal chars were filtered out, the image will be tagged differently from
+			// what the user expects, so return error instead
+			return names, fmt.Errorf("tag contains illegal characters: %v", t)
+		}
+		if !ib.validateTag(ft) {
+			return names, fmt.Errorf("invalid tag: %v", ft)
+		}
+		names = append(names, fmt.Sprintf("%v:%v", bname, ft))
 	}
-	return names
+	return names, nil
 }
 
 // Build builds an image accourding to the request
@@ -202,10 +221,14 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	} else {
 		dp = req.Build.DockerfilePath
 	}
+	inames, err := ib.getFullImageNames(req)
+	if err != nil {
+		return "", err
+	}
 	rbi := &RepoBuildData{
 		DockerfilePath: dp,
 		Context:        contents,
-		Tags:           ib.getFullImageNames(req),
+		Tags:           inames,
 	}
 	return ib.dobuild(ctx, req, rbi)
 }
@@ -433,7 +456,11 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 		RegistryAuth: auth,
 	}
 	var output []BuildEvent
-	for _, name := range ib.getFullImageNames(req) {
+	inames, err := ib.getFullImageNames(req)
+	if err != nil {
+		return err
+	}
+	for _, name := range inames {
 		if isCancelled(ctx.Done()) {
 			return fmt.Errorf("push was cancelled: %v", ctx.Err())
 		}
