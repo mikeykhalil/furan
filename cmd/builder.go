@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -228,6 +229,16 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 		return fmt.Errorf("unknown action: %v", action)
 	}
 	return ib.dl.SaveBuildOutput(id, events, column)
+}
+
+// saveEventLogToS3 writes a stream of events to S3 and returns the S3 HTTP URL
+func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, action actionType, events []BuildEvent) (string, error) {
+	b := bytes.NewBuffer([]byte{})
+	for _, e := range events {
+		b.Write([]byte(e.Message + "\n"))
+	}
+	s3opts := &S3Options{}
+	err := ib.osm.WriteFile(string, ImageDescription, "text/plain", b, s3opts)
 }
 
 const (

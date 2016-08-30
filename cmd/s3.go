@@ -36,6 +36,7 @@ type ObjectStorageManger interface {
 	Push(ImageDescription, io.Reader, interface{}) error
 	Pull(ImageDescription, io.WriterAt, interface{}) error
 	Size(ImageDescription, interface{}) (int64, error)
+	WriteFile(string, ImageDescription, string, io.Reader, interface{}) error
 }
 
 // S3Options contains the information needed to push/pull an image from S3
@@ -91,27 +92,12 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 	if err != nil {
 		return err
 	}
-	sess := sm.getSession(s3opts.Region)
-	u := s3manager.NewUploaderWithClient(s3.New(sess), func(u *s3manager.Uploader) {
-		u.Concurrency = int(sm.config.Concurrency)
-	})
-	ct := "application/gzip"
-	k := generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
-	ui := &s3manager.UploadInput{
-		ContentType: &ct,
-		Bucket:      &s3opts.Bucket,
-		Body:        in,
-		Key:         &k,
-	}
-	uo, err := u.Upload(ui)
+	err = sm.pushdata(generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA), "application/gzip", in, s3opts, "")
 	if err != nil {
 		return err
 	}
 	d := time.Now().UTC().Sub(started).Seconds()
 	sm.mc.Duration("s3.push.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
-	sm.logf("S3 push location: %v", uo.Location)
-	sm.logf("S3 version ID: %v", uo.VersionID)
-	sm.logf("S3 upload ID: %v", uo.UploadID)
 	return nil
 }
 
@@ -172,4 +158,47 @@ func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64
 		return 0, fmt.Errorf("sz is nil")
 	}
 	return *sz, nil
+}
+
+func (sm *S3StorageManager) pushdata(key string, contentType string, in io.Reader, s3opts *S3Options, perms string) error {
+	sess := sm.getSession(s3opts.Region)
+	u := s3manager.NewUploaderWithClient(s3.New(sess), func(u *s3manager.Uploader) {
+		u.Concurrency = int(sm.config.Concurrency)
+	})
+	ct := contentType
+	var p *string
+	if perms != "" {
+		p = &perms
+	}
+	ui := &s3manager.UploadInput{
+		ContentType: &ct,
+		Bucket:      &s3opts.Bucket,
+		Body:        in,
+		Key:         &key,
+		ACL:         p,
+	}
+	uo, err := u.Upload(ui)
+	if err != nil {
+		return err
+	}
+	sm.logf("S3 write location: %v", uo.Location)
+	sm.logf("S3 version ID: %v", uo.VersionID)
+	sm.logf("S3 upload ID: %v", uo.UploadID)
+	return nil
+}
+
+// WriteFile writes a named file to the configured bucket
+func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, contentType string, in io.Reader, opts interface{}) error {
+	started := time.Now().UTC()
+	s3opts, err := sm.getOpts(opts)
+	if err != nil {
+		return err
+	}
+	err = sm.pushdata(name, contentType, in, s3opts, s3.BucketCannedACLPublicRead)
+	if err != nil {
+		return err
+	}
+	d := time.Now().UTC().Sub(started).Seconds()
+	sm.mc.Duration("s3.write_file.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
+	return nil
 }
