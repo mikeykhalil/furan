@@ -49,7 +49,7 @@ type RepoBuildData struct {
 // Add whatever Docker API methods we care about here
 type ImageBuildClient interface {
 	ImageBuild(context.Context, io.Reader, dtypes.ImageBuildOptions) (dtypes.ImageBuildResponse, error)
-	ImageInspectWithRaw(context.Context, string, bool) (dtypes.ImageInspect, []byte, error)
+	ImageInspectWithRaw(context.Context, string) (dtypes.ImageInspect, []byte, error)
 	ImageRemove(context.Context, string, dtypes.ImageRemoveOptions) ([]dtypes.ImageDelete, error)
 	ImagePush(context.Context, string, dtypes.ImagePushOptions) (io.ReadCloser, error)
 	ImageSave(context.Context, []string) (io.ReadCloser, error)
@@ -315,7 +315,7 @@ func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
-	res, _, err := ib.c.ImageInspectWithRaw(ctx, imageid, true)
+	res, _, err := ib.c.ImageInspectWithRaw(ctx, imageid)
 	if err != nil {
 		return err
 	}
