@@ -55,6 +55,7 @@ type ImageBuildClient interface {
 	ImageRemove(context.Context, string, dtypes.ImageRemoveOptions) ([]dtypes.ImageDelete, error)
 	ImagePush(context.Context, string, dtypes.ImagePushOptions) (io.ReadCloser, error)
 	ImageSave(context.Context, []string) (io.ReadCloser, error)
+	ImageList(context.Context, dtypes.ImageListOptions) ([]dtypes.Image, error)
 }
 
 // ImageBuildPusher describes an object that can build and push container images
