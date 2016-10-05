@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	"golang.org/x/net/context"
 
@@ -64,21 +65,28 @@ type ImageBuildPusher interface {
 	PushBuildToS3(context.Context, string, *BuildRequest) error
 }
 
+type S3ErrorLogConfig struct {
+	PushToS3 bool
+	Region   string
+	Bucket   string
+}
+
 // ImageBuilder is an object that builds and pushes images
 type ImageBuilder struct {
-	c         ImageBuildClient
-	gf        CodeFetcher
-	ep        EventBusProducer
-	dl        DataLayer
-	mc        MetricsCollector
-	is        ImageSquasher
-	osm       ObjectStorageManger
-	dockercfg map[string]dtypes.AuthConfig
-	logger    *log.Logger
+	c          ImageBuildClient
+	gf         CodeFetcher
+	ep         EventBusProducer
+	dl         DataLayer
+	mc         MetricsCollector
+	is         ImageSquasher
+	osm        ObjectStorageManger
+	dockercfg  map[string]dtypes.AuthConfig
+	s3errorcfg S3ErrorLogConfig
+	logger     *log.Logger
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, osm ObjectStorageManger, is ImageSquasher, dcfg map[string]dtypes.AuthConfig, logger *log.Logger) (*ImageBuilder, error) {
+func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, osm ObjectStorageManger, is ImageSquasher, dcfg map[string]dtypes.AuthConfig, s3errorcfg S3ErrorLogConfig, logger *log.Logger) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	ib.gf = gf
 	ib.c = dc
@@ -88,6 +96,7 @@ func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetc
 	ib.osm = osm
 	ib.is = is
 	ib.dockercfg = dcfg
+	ib.s3errorcfg = s3errorcfg
 	ib.logger = logger
 	return ib, nil
 }
@@ -255,13 +264,34 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 }
 
 // saveEventLogToS3 writes a stream of events to S3 and returns the S3 HTTP URL
-func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, action actionType, events []BuildEvent) (string, error) {
+func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref string, action actionType, events []BuildEvent) (string, error) {
+	id, ok := BuildIDFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("build id missing from context")
+	}
+	log.Printf("getting commitsha")
+	csha, err := ib.getCommitSHA(repo, ref)
+	if err != nil {
+		log.Printf("error getting commitsha")
+		return "", err
+	}
+	idesc := ImageDescription{
+		GitHubRepo: repo,
+		CommitSHA:  csha,
+	}
 	b := bytes.NewBuffer([]byte{})
 	for _, e := range events {
 		b.Write([]byte(e.Message + "\n"))
 	}
-	s3opts := &S3Options{}
-	err := ib.osm.WriteFile(string, ImageDescription, "text/plain", b, s3opts)
+	now := time.Now().UTC()
+	s3opts := &S3Options{
+		Region:    ib.s3errorcfg.Region,
+		Bucket:    ib.s3errorcfg.Bucket,
+		KeyPrefix: now.Round(time.Hour).Format(time.RFC3339) + "/",
+	}
+	key := fmt.Sprintf("%v-%v-error.txt", id.String(), action.String())
+	log.Printf("doing upload")
+	return ib.osm.WriteFile(key, idesc, "text/plain", b, s3opts)
 }
 
 const (
@@ -293,6 +323,18 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	output, err := ib.monitorDockerAction(ctx, ibr.Body, Build)
 	err2 := ib.saveOutput(ctx, Build, output) // we want to save output even if error
 	if err != nil {
+		if ib.s3errorcfg.PushToS3 {
+			log.Printf("pushing error to s3")
+			loc, err3 := ib.saveEventLogToS3(ctx, req.Build.GithubRepo, req.Build.Ref, Build, output)
+			if err3 != nil {
+				log.Printf("error pushing build events to s3: %v", err3)
+				ib.logf(ctx, "error saving build events to S3: %v", err3)
+				return imageid, err
+			}
+			log.Printf("loc: %v", loc)
+			return imageid, fmt.Errorf("error details: %v", loc)
+		}
+		log.Printf("didn't push error to s3")
 		return imageid, err
 	}
 	if err2 != nil {
@@ -493,18 +535,26 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *BuildReque
 	return ib.saveOutput(ctx, Push, output)
 }
 
+func (ib *ImageBuilder) getCommitSHA(repo, ref string) (string, error) {
+	rl := strings.Split(repo, "/")
+	if len(rl) != 2 {
+		return "", fmt.Errorf("malformed GitHub repo: %v", repo)
+	}
+	csha, err := ib.gf.GetCommitSHA(rl[0], rl[1], ref)
+	if err != nil {
+		return "", fmt.Errorf("error getting commit SHA: %v", err)
+	}
+	return csha, nil
+}
+
 // PushBuildToS3 exports and uploads the already built image to the configured S3 bucket/key
 func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *BuildRequest) error {
 	if isCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
-	rl := strings.Split(req.Build.GithubRepo, "/")
-	if len(rl) != 2 {
-		return fmt.Errorf("malformed GitHub repo: %v", req.Build.GithubRepo)
-	}
-	csha, err := ib.gf.GetCommitSHA(rl[0], rl[1], req.Build.Ref)
+	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
 	if err != nil {
-		return fmt.Errorf("error getting commit SHA: %v", err)
+		return err
 	}
 	r, err := ib.c.ImageSave(ctx, []string{imageid})
 	if err != nil {

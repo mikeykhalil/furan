@@ -36,7 +36,7 @@ type ObjectStorageManger interface {
 	Push(ImageDescription, io.Reader, interface{}) error
 	Pull(ImageDescription, io.WriterAt, interface{}) error
 	Size(ImageDescription, interface{}) (int64, error)
-	WriteFile(string, ImageDescription, string, io.Reader, interface{}) error
+	WriteFile(string, ImageDescription, string, io.Reader, interface{}) (string, error)
 }
 
 // S3Options contains the information needed to push/pull an image from S3
@@ -92,7 +92,7 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 	if err != nil {
 		return err
 	}
-	err = sm.pushdata(generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA), "application/gzip", in, s3opts, "")
+	_, err = sm.pushdata(generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA), "application/gzip", in, s3opts, "")
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64
 	return *sz, nil
 }
 
-func (sm *S3StorageManager) pushdata(key string, contentType string, in io.Reader, s3opts *S3Options, perms string) error {
+func (sm *S3StorageManager) pushdata(key string, contentType string, in io.Reader, s3opts *S3Options, perms string) (string, error) {
 	sess := sm.getSession(s3opts.Region)
 	u := s3manager.NewUploaderWithClient(s3.New(sess), func(u *s3manager.Uploader) {
 		u.Concurrency = int(sm.config.Concurrency)
@@ -179,26 +179,31 @@ func (sm *S3StorageManager) pushdata(key string, contentType string, in io.Reade
 	}
 	uo, err := u.Upload(ui)
 	if err != nil {
-		return err
+		return "", err
 	}
+
 	sm.logf("S3 write location: %v", uo.Location)
 	sm.logf("S3 version ID: %v", uo.VersionID)
 	sm.logf("S3 upload ID: %v", uo.UploadID)
-	return nil
+	return uo.Location, nil
 }
 
-// WriteFile writes a named file to the configured bucket
-func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, contentType string, in io.Reader, opts interface{}) error {
+// WriteFile writes a named file to the configured bucket and returns the S3 location URL
+func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, contentType string, in io.Reader, opts interface{}) (string, error) {
 	started := time.Now().UTC()
 	s3opts, err := sm.getOpts(opts)
 	if err != nil {
-		return err
+		log.Printf("s3: error getting opts: %v", err)
+		return "", err
 	}
-	err = sm.pushdata(name, contentType, in, s3opts, s3.BucketCannedACLPublicRead)
+	log.Printf("s3: doing pushdata")
+	loc, err := sm.pushdata(name, contentType, in, s3opts, s3.BucketCannedACLPublicRead)
 	if err != nil {
-		return err
+		log.Printf("s3: error doing pushdata: %v", err)
+		return "", err
 	}
 	d := time.Now().UTC().Sub(started).Seconds()
 	sm.mc.Duration("s3.write_file.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
-	return nil
+	log.Printf("s3: done")
+	return loc, nil
 }
