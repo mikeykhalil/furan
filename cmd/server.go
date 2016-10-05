@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	docker "github.com/docker/engine-api/client"
 	"github.com/gorilla/mux"
@@ -27,6 +28,8 @@ type serverconfig struct {
 	sumoURL             string
 	vaultSumoURLPath    string
 	healthcheckHTTPport uint
+	gcIntervalSecs      uint
+	dockerDiskPath      string
 }
 
 var serverConfig serverconfig
@@ -56,6 +59,8 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
 	serverCmd.PersistentFlags().BoolVar(&serverConfig.logToSumo, "log-to-sumo", true, "Send log entries to SumoLogic HTTPS collector")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultSumoURLPath, "sumo-collector-path", "/sumologic/url", "Vault path SumoLogic collector URL")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.gcIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.dockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
 	RootCmd.AddCommand(serverCmd)
 }
 
@@ -83,12 +88,8 @@ func healthcheck() {
 	logger.Println(server.ListenAndServe())
 }
 
-func startgRPC(mc MetricsCollector) {
+func startgRPC(mc MetricsCollector, dc ImageBuildClient) {
 	gf := NewGitHubFetcher(gitConfig.token)
-	dc, err := docker.NewEnvClient()
-	if err != nil {
-		log.Fatalf("error creating Docker client: %v", err)
-	}
 	osm := NewS3StorageManager(awsConfig, mc, logger)
 	is := NewDockerImageSquasher(logger)
 	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, logger)
@@ -97,6 +98,19 @@ func startgRPC(mc MetricsCollector) {
 	}
 	grpcSvr = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, mc, serverConfig.queuesize, serverConfig.concurrency, logger)
 	go grpcSvr.ListenRPC(serverConfig.grpcAddr, serverConfig.grpcPort)
+}
+
+func startGC(dc ImageBuildClient, mc MetricsCollector, log *log.Logger, interval uint) {
+	igc := NewDockerImageGC(log, dc, mc, serverConfig.dockerDiskPath)
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				igc.GC()
+			}
+		}
+	}()
 }
 
 func server(cmd *cobra.Command, args []string) {
@@ -118,7 +132,13 @@ func server(cmd *cobra.Command, args []string) {
 		logger.Fatalf("error reading dockercfg: %v", err)
 	}
 
-	startgRPC(mc)
+	dc, err := docker.NewEnvClient()
+	if err != nil {
+		log.Fatalf("error creating Docker client: %v", err)
+	}
+
+	startgRPC(mc, dc)
+	startGC(dc, mc, logger, serverConfig.gcIntervalSecs)
 	go healthcheck()
 
 	r := mux.NewRouter()
