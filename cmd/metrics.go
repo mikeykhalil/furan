@@ -21,6 +21,10 @@ type MetricsCollector interface {
 	BuildSucceeded(string, string) error
 	KafkaProducerFailure() error
 	KafkaConsumerFailure() error
+	GCFailure() error
+	GCUntaggedImageRemoved() error
+	GCBytesReclaimed(uint64) error
+	DiskFree(uint64) error
 }
 
 // DatadogCollector represents a collector that pushes metrics to Datadog
@@ -95,4 +99,24 @@ func (dc *DatadogCollector) KafkaProducerFailure() error {
 // KafkaConsumerFailure increments the counter for a Kafka read failure
 func (dc *DatadogCollector) KafkaConsumerFailure() error {
 	return dc.c.Count("kafka.consumer.failure", 1, nil, 1)
+}
+
+// GCFailure reports an occurance of GC failure
+func (dc *DatadogCollector) GCFailure() error {
+	return dc.c.Count("gc.failure", 1, nil, 1)
+}
+
+// GCUntaggedImageRemoved reports a single untagged image removal
+func (dc *DatadogCollector) GCUntaggedImageRemoved() error {
+	return dc.c.Count("gc.rm_untagged_image", 1, nil, 1)
+}
+
+// GCBytesReclaimed reports the total bytes reclaimed during a GC run
+func (dc *DatadogCollector) GCBytesReclaimed(size uint64) error {
+	return dc.c.Histogram("gc.bytes_reclaimed", float64(size), nil, 1)
+}
+
+// DiskFree reports the amount of disk space left on the Docker volume
+func (dc *DatadogCollector) DiskFree(bytes uint64) error {
+	return dc.c.Histogram("disk_bytes_free", float64(bytes), nil, 1)
 }
