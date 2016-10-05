@@ -25,8 +25,21 @@ DOCKER_API_VERSION (optional)
 DOCKER_TLS_VERIFY
 DOCKER_CERT_PATH
 `,
+	PreRun: func(cmd *cobra.Command, args []string) {
+		if buildS3ErrorLogs {
+			if buildS3ErrorLogBucket == "" {
+				clierr("S3 error log bucket must be defined")
+			}
+			if buildS3ErrorLogRegion == "" {
+				clierr("S3 error log region must be defined")
+			}
+		}
+	},
 	Run: build,
 }
+
+var buildS3ErrorLogs bool
+var buildS3ErrorLogRegion, buildS3ErrorLogBucket string
 
 func init() {
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.GithubRepo, "github-repo", "", "source github repo")
@@ -38,6 +51,9 @@ func init() {
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Push.S3.KeyPrefix, "s3-key-prefix", "", "S3 key prefix")
 	buildCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (optional, comma-delimited)")
 	buildCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA (optional)")
+	buildCmd.PersistentFlags().BoolVar(&buildS3ErrorLogs, "s3-error-logs", false, "Upload failed build logs to S3 (region and bucket must be specified)")
+	buildCmd.PersistentFlags().StringVar(&buildS3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
+	buildCmd.PersistentFlags().StringVar(&buildS3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
 	RootCmd.AddCommand(buildCmd)
 }
 
@@ -99,7 +115,12 @@ func build(cmd *cobra.Command, args []string) {
 
 	osm := NewS3StorageManager(awsConfig, mc, clogger)
 	is := NewDockerImageSquasher(clogger)
-	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, logger)
+	s3errcfg := S3ErrorLogConfig{
+		PushToS3: buildS3ErrorLogs,
+		Region:   buildS3ErrorLogRegion,
+		Bucket:   buildS3ErrorLogBucket,
+	}
+	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}

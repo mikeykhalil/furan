@@ -28,6 +28,9 @@ type serverconfig struct {
 	sumoURL             string
 	vaultSumoURLPath    string
 	healthcheckHTTPport uint
+	s3ErrorLogs         bool
+	s3ErrorLogBucket    string
+	s3ErrorLogRegion    string
 	gcIntervalSecs      uint
 	dockerDiskPath      string
 }
@@ -44,7 +47,17 @@ var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run Furan server",
 	Long:  `Furan API server (see docs)`,
-	Run:   server,
+	PreRun: func(cmd *cobra.Command, args []string) {
+		if serverConfig.s3ErrorLogs {
+			if serverConfig.s3ErrorLogBucket == "" {
+				clierr("S3 error log bucket must be defined")
+			}
+			if serverConfig.s3ErrorLogRegion == "" {
+				clierr("S3 error log region must be defined")
+			}
+		}
+	},
+	Run: server,
 }
 
 func init() {
@@ -59,6 +72,9 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
 	serverCmd.PersistentFlags().BoolVar(&serverConfig.logToSumo, "log-to-sumo", true, "Send log entries to SumoLogic HTTPS collector")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultSumoURLPath, "sumo-collector-path", "/sumologic/url", "Vault path SumoLogic collector URL")
+	serverCmd.PersistentFlags().BoolVar(&serverConfig.s3ErrorLogs, "s3-error-logs", false, "Upload failed build logs to S3 (region and bucket must be specified)")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.s3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.s3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.gcIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.dockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
 	RootCmd.AddCommand(serverCmd)
@@ -92,7 +108,12 @@ func startgRPC(mc MetricsCollector, dc ImageBuildClient) {
 	gf := NewGitHubFetcher(gitConfig.token)
 	osm := NewS3StorageManager(awsConfig, mc, logger)
 	is := NewDockerImageSquasher(logger)
-	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, logger)
+	s3errcfg := S3ErrorLogConfig{
+		PushToS3: serverConfig.s3ErrorLogs,
+		Region:   serverConfig.s3ErrorLogRegion,
+		Bucket:   serverConfig.s3ErrorLogBucket,
+	}
+	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}
