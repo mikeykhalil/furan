@@ -123,8 +123,7 @@ func (ib *ImageBuilder) logf(ctx context.Context, msg string, params ...interfac
 	}()
 }
 
-func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype BuildEvent_EventType,
-	errtype BuildEventError_ErrorType, msg string, finished bool) (*BuildEvent, error) {
+func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype BuildEvent_EventType, errtype BuildEventError_ErrorType, msg string, finished bool) (*BuildEvent, error) {
 	var event *BuildEvent
 	id, ok := BuildIDFromContext(ctx)
 	if !ok {
@@ -143,20 +142,14 @@ func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype BuildEvent_Even
 	return event, nil
 }
 
-func (ib *ImageBuilder) event(ctx context.Context, etype BuildEvent_EventType,
-	errtype BuildEventError_ErrorType, msg string, finished bool) (*BuildEvent, error) {
-	event, err := ib.getBuildEvent(ctx, etype, errtype, msg, finished)
-	if err != nil {
-		return event, err
-	}
-	ib.logger.Printf("event: %v", msg)
+func (ib *ImageBuilder) event(bevent *BuildEvent) {
+	ib.logger.Printf("event: %v", bevent.Message)
 	go func() {
-		err := ib.ep.PublishEvent(event)
+		err := ib.ep.PublishEvent(bevent)
 		if err != nil {
 			ib.logger.Printf("error pushing event to bus: %v", err)
 		}
 	}()
-	return event, nil
 }
 
 func (ib ImageBuilder) filterTagName(tag string) string {
@@ -270,10 +263,8 @@ func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref s
 	if !ok {
 		return "", fmt.Errorf("build id missing from context")
 	}
-	log.Printf("getting commitsha")
 	csha, err := ib.getCommitSHA(repo, ref)
 	if err != nil {
-		log.Printf("error getting commitsha")
 		return "", err
 	}
 	idesc := ImageDescription{
@@ -291,7 +282,6 @@ func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref s
 		KeyPrefix: now.Round(time.Hour).Format(time.RFC3339) + "/",
 	}
 	key := fmt.Sprintf("%v-%v-error.txt", id.String(), action.String())
-	log.Printf("doing upload")
 	return ib.osm.WriteFile(key, idesc, "text/plain", b, s3opts)
 }
 
@@ -324,18 +314,15 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	output, err := ib.monitorDockerAction(ctx, ibr.Body, Build)
 	err2 := ib.saveOutput(ctx, Build, output) // we want to save output even if error
 	if err != nil {
-		if ib.s3errorcfg.PushToS3 {
-			log.Printf("pushing error to s3")
+		if output[len(output)-1].EventError.ErrorType == BuildEventError_FATAL && ib.s3errorcfg.PushToS3 {
+			ib.logf(ctx, "pushing failed build log to S3: %v", id.String())
 			loc, err3 := ib.saveEventLogToS3(ctx, req.Build.GithubRepo, req.Build.Ref, Build, output)
 			if err3 != nil {
-				log.Printf("error pushing build events to s3: %v", err3)
 				ib.logf(ctx, "error saving build events to S3: %v", err3)
 				return imageid, err
 			}
-			log.Printf("loc: %v", loc)
 			return imageid, fmt.Errorf("error details: %v", loc)
 		}
-		log.Printf("didn't push error to s3")
 		return imageid, err
 	}
 	if err2 != nil {
@@ -426,14 +413,16 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 		} else {
 			errtype = BuildEventError_NO_ERROR
 		}
-		bevent, err = ib.event(ctx, buildEventTypeFromActionType(atype), errtype, string(line), false)
+		bevent, err = ib.getBuildEvent(ctx, buildEventTypeFromActionType(atype), errtype, string(line), false)
 		if err != nil {
 			return output, err
 		}
 		output = append(output, *bevent)
 		if errtype == BuildEventError_FATAL {
+			// do not push final event (leave to upstream error handler)
 			return output, fmt.Errorf("fatal error performing %v action", atype.String())
 		}
+		ib.event(bevent)
 	}
 }
 

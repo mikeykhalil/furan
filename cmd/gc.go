@@ -38,7 +38,7 @@ func NewDockerImageGC(log *log.Logger, dc ImageBuildClient, mc MetricsCollector,
 func (dgc *DockerImageGC) reportFreeDiskSpace() error {
 	if _, err := os.Stat(dgc.dockerPath); err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("gc: %v: not found, not calculating free space", dgc.dockerPath)
+			dgc.log.Printf("gc: %v: not found, not calculating free space", dgc.dockerPath)
 			return nil
 		}
 		return err
@@ -49,7 +49,7 @@ func (dgc *DockerImageGC) reportFreeDiskSpace() error {
 		return err
 	}
 	free := fs.Bfree * uint64(fs.Bsize) // bytes
-	log.Printf("gc: %v free space: %v", dgc.dockerPath, humanize.Bytes(free))
+	dgc.log.Printf("gc: %v free space: %v", dgc.dockerPath, humanize.Bytes(free))
 	dgc.mc.DiskFree(free)
 	return nil
 }

@@ -193,17 +193,13 @@ func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, conten
 	started := time.Now().UTC()
 	s3opts, err := sm.getOpts(opts)
 	if err != nil {
-		log.Printf("s3: error getting opts: %v", err)
 		return "", err
 	}
-	log.Printf("s3: doing pushdata")
 	loc, err := sm.pushdata(name, contentType, in, s3opts, s3.BucketCannedACLPublicRead)
 	if err != nil {
-		log.Printf("s3: error doing pushdata: %v", err)
 		return "", err
 	}
 	d := time.Now().UTC().Sub(started).Seconds()
 	sm.mc.Duration("s3.write_file.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
-	log.Printf("s3: done")
 	return loc, nil
 }
