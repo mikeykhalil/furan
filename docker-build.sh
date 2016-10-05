@@ -3,6 +3,9 @@
 # DO NOT RUN LOCALLY - For docker build only!
 # WILL NUKE YOUR .git !
 
+# force failure for testing
+exit 1
+
 apk update || exit 1
 apk add git || exit 1
 
