@@ -195,6 +195,16 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) ([]string, error) {
 		}
 		names = append(names, fmt.Sprintf("%v:%v", bname, ft))
 	}
+	if req.Build.TagWithCommitSha {
+		csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+		if err != nil {
+			return names, fmt.Errorf("error getting commit sha: %v", err)
+		}
+		if !ib.validateTag(csha) {
+			return names, fmt.Errorf("invalid commit sha tag: %v", csha)
+		}
+		names = append(names, fmt.Sprintf("%v:%v", bname, csha))
+	}
 	return names, nil
 }
 
@@ -229,6 +239,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	if err != nil {
 		return "", err
 	}
+	ib.logf(ctx, "tags: %v", inames)
 	rbi := &RepoBuildData{
 		DockerfilePath: dp,
 		Context:        contents,
@@ -546,7 +557,14 @@ func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *
 	if err != nil {
 		return err
 	}
-	r, err := ib.c.ImageSave(ctx, []string{imageid})
+	info, _, err := ib.c.ImageInspectWithRaw(ctx, imageid)
+	if err != nil {
+		return err
+	}
+	if len(info.RepoTags) == 0 {
+		return fmt.Errorf("no tags found for image")
+	}
+	r, err := ib.c.ImageSave(ctx, info.RepoTags)
 	if err != nil {
 		return fmt.Errorf("error saving image: %v", err)
 	}
