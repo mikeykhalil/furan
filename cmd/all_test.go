@@ -2,11 +2,17 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"log"
+	"os"
+	"testing"
+	"time"
 
 	"golang.org/x/net/context"
 
 	dtypes "github.com/docker/engine-api/types"
+	"github.com/dollarshaveclub/go-lib/cassandra"
 	"github.com/gocql/gocql"
 )
 
@@ -126,4 +132,61 @@ func (mibc *MockImageBuildClient) ImageRemove(ctx context.Context, id string, op
 
 func (mibc *MockImageBuildClient) ImagePush(ctx context.Context, tag string, opts dtypes.ImagePushOptions) (io.ReadCloser, error) {
 	return &BufferCloser{}, nil
+}
+
+const (
+	testKeyspace = "furan_test"
+)
+
+var tn = os.Getenv("SCYLLA_TEST_NODE")
+var ts *gocql.Session
+
+func setupTestDB() {
+	// create keyspace
+	c := gocql.NewCluster(tn)
+	c.ProtoVersion = 3
+	c.NumConns = 20
+	c.SocketKeepalive = time.Duration(30) * time.Second
+	s, err := c.CreateSession()
+	if err != nil {
+		log.Fatalf("error creating keyspace session: %v", err)
+	}
+	defer s.Close()
+	err = s.Query(fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %v WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1};", testKeyspace)).Exec()
+	if err != nil {
+		log.Fatalf("error creating keyspace: %v", err)
+	}
+	time.Sleep(1)
+
+	// DB setup
+	c.Keyspace = testKeyspace
+	dbConfig.cluster = c
+	dbConfig.nodes = []string{tn}
+	dbConfig.keyspace = testKeyspace
+	err = cassandra.CreateRequiredTypes(dbConfig.cluster, requiredUDTs)
+	if err != nil {
+		log.Fatalf("error creating UDTs: %v", err)
+	}
+	err = cassandra.CreateRequiredTables(dbConfig.cluster, requiredTables)
+	if err != nil {
+		log.Fatalf("error creating tables: %v", err)
+	}
+	ts, err = dbConfig.cluster.CreateSession()
+	if err != nil {
+		log.Fatalf("error getting session: %v", err)
+	}
+}
+
+func teardownTestDB() {
+	q := fmt.Sprintf("DROP KEYSPACE %v;", testKeyspace)
+	err := ts.Query(q).Exec()
+	if err != nil {
+		log.Fatalf("error dropping keyspace: %v", err)
+	}
+}
+
+func TestMain(m *testing.M) {
+	setupTestDB()
+	defer teardownTestDB()
+	m.Run()
 }

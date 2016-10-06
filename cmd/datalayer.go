@@ -119,9 +119,13 @@ func (dl *DBLayer) SetBuildState(id gocql.UUID, state BuildStatusResponse_BuildS
 // DeleteBuild removes a build from the DB.
 // Only used in case of queue full when we can't actually do a build
 func (dl *DBLayer) DeleteBuild(id gocql.UUID) error {
-	q := `DELETE FROM builds_by_id WHERE id = ?;
-	      DELETE FROM build_metrics_by_id WHERE id = ?;`
-	return dl.s.Query(q, id, id).Exec()
+	q := `DELETE FROM builds_by_id WHERE id = ?;`
+	err := dl.s.Query(q, id).Exec()
+	if err != nil {
+		return err
+	}
+	q = `DELETE FROM build_metrics_by_id WHERE id = ?;`
+	return dl.s.Query(q, id).Exec()
 }
 
 // SetBuildTimeMetric sets a build metric to time.Now()
@@ -188,8 +192,20 @@ func (dl *DBLayer) SaveBuildOutput(id gocql.UUID, output []BuildEvent, column st
 
 // GetBuildOutput returns an array of stream events from the database
 func (dl *DBLayer) GetBuildOutput(id gocql.UUID, column string) ([]BuildEvent, error) {
-	var output []BuildEvent
+	var rawoutput [][]byte
+	output := []BuildEvent{}
 	q := `SELECT %v FROM build_events_by_id WHERE id = ?;`
-	err := dl.s.Query(fmt.Sprintf(q, column), id).Scan(&output)
-	return output, err
+	err := dl.s.Query(fmt.Sprintf(q, column), id).Scan(&rawoutput)
+	if err != nil {
+		return output, err
+	}
+	for _, rawevent := range rawoutput {
+		event := BuildEvent{}
+		err = proto.Unmarshal(rawevent, &event)
+		if err != nil {
+			return output, err
+		}
+		output = append(output, event)
+	}
+	return output, nil
 }
