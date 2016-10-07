@@ -68,9 +68,7 @@ func (dl *DBLayer) GetBuildByID(id gocql.UUID) (*BuildStatusResponse, error) {
 	bi := &BuildStatusResponse{
 		BuildId: id.String(),
 	}
-	err := dl.s.Query(q, id).Scan(&udt.GithubRepo, &udt.DockerfilePath, &udt.Tags,
-		&udt.TagWithCommitSha, &udt.Ref, &udt.PushRegistryRepo, &udt.PushS3Region,
-		&udt.PushS3KeyPrefix, &udt.PushS3KeyPrefix, &state, &bi.Finished, &bi.Failed,
+	err := dl.s.Query(q, id).Scan(&udt, &state, &bi.Finished, &bi.Failed,
 		&bi.Cancelled, &started, &completed, &bi.Duration)
 	if err != nil {
 		return bi, err
