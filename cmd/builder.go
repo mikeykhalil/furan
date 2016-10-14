@@ -569,24 +569,25 @@ func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *
 	if err != nil {
 		return fmt.Errorf("error saving image: %v", err)
 	}
+	defer r.Close()
 	ib.logf(ctx, "squashing and pushing to S3: %v: %v/%v%v/%v.tar.gz", req.Push.S3.Region, req.Push.S3.Bucket, req.Push.S3.KeyPrefix, req.Build.GithubRepo, csha)
 	done := make(chan error)
-	pr, pw := io.Pipe()
-	go func() {
-		var err error
-		var si *SquashInfo
-		defer pw.CloseWithError(err)
-		si, err = ib.is.Squash(ctx, r, pw)
-		if err != nil {
-			done <- fmt.Errorf("error squashing image: %v", err)
-			return
-		}
-		ib.mc.Size("image.squashed.size_difference_bytes", req.Build.GithubRepo, req.Build.Ref, nil, si.SizeDifference)
-		ib.mc.Float("image.squashed.size_difference_pct", req.Build.GithubRepo, req.Build.Ref, nil, si.SizePctDifference)
-		ib.mc.Size("image.squashed.files_removed", req.Build.GithubRepo, req.Build.Ref, nil, int64(si.FilesRemovedCount))
-		ib.mc.Size("image.squashed.layers_removed", req.Build.GithubRepo, req.Build.Ref, nil, int64(si.LayersRemoved))
-		done <- nil
-	}()
+	// pr, pw := io.Pipe()
+	// go func() {
+	// 	var err error
+	// 	var si *SquashInfo
+	// 	defer pw.CloseWithError(err)
+	// 	si, err = ib.is.Squash(ctx, r, pw)
+	// 	if err != nil {
+	// 		done <- fmt.Errorf("error squashing image: %v", err)
+	// 		return
+	// 	}
+	// 	ib.mc.Size("image.squashed.size_difference_bytes", req.Build.GithubRepo, req.Build.Ref, nil, si.SizeDifference)
+	// 	ib.mc.Float("image.squashed.size_difference_pct", req.Build.GithubRepo, req.Build.Ref, nil, si.SizePctDifference)
+	// 	ib.mc.Size("image.squashed.files_removed", req.Build.GithubRepo, req.Build.Ref, nil, int64(si.FilesRemovedCount))
+	// 	ib.mc.Size("image.squashed.layers_removed", req.Build.GithubRepo, req.Build.Ref, nil, int64(si.LayersRemoved))
+	// 	done <- nil
+	// }()
 	go func() {
 		idesc := ImageDescription{
 			GitHubRepo: req.Build.GithubRepo,
@@ -597,11 +598,13 @@ func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *
 			Bucket:    req.Push.S3.Bucket,
 			KeyPrefix: req.Push.S3.KeyPrefix,
 		}
-		done <- ib.osm.Push(idesc, pr, opts)
+		//done <- ib.osm.Push(idesc, pr, opts)
+		done <- ib.osm.Push(idesc, r, opts)
 	}()
 	var failed bool
 	errstrs := []string{}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
+		//for i := 0; i < 2; i++ {
 		err = <-done
 		if err != nil {
 			failed = true
