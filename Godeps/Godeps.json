@@ -1,7 +1,7 @@
 {
 	"ImportPath": "github.com/dollarshaveclub/furan",
 	"GoVersion": "go1.7",
-	"GodepVersion": "v74",
+	"GodepVersion": "v75",
 	"Deps": [
 		{
 			"ImportPath": "github.com/DataDog/datadog-go/statsd",
@@ -527,53 +527,63 @@
 		},
 		{
 			"ImportPath": "google.golang.org/grpc",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/codes",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/credentials",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/grpclog",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/internal",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/metadata",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/naming",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/peer",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "google.golang.org/grpc/transport",
-			"Comment": "v1.0.1-GA-29-g79b7c34",
-			"Rev": "79b7c349179cdd6efd8bac4a1ce7f01b98c16e9b"
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		},
 		{
 			"ImportPath": "gopkg.in/inf.v0",
 			"Comment": "v0.9.0",
 			"Rev": "3887ee99ecf07df5b447e9b00d9c0b2adaa9f3e4"
+		},
+		{
+			"ImportPath": "google.golang.org/grpc/stats",
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
+		},
+		{
+			"ImportPath": "google.golang.org/grpc/tap",
+			"Comment": "v1.0.5-6-g9d682f9",
+			"Rev": "9d682f9293b408c42d17c587d0e2a31237ac3f10"
 		}
 	]
 }
