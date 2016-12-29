@@ -19,7 +19,7 @@ var tbr = &BuildRequest{
 	},
 }
 
-func TestCreateBuild(t *testing.T) {
+func TestDBCreateBuild(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestCreateBuild(t *testing.T) {
 	}
 }
 
-func TestGetBuildByID(t *testing.T) {
+func TestDBGetBuildByID(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestGetBuildByID(t *testing.T) {
 	}
 }
 
-func TestSetBuildFlags(t *testing.T) {
+func TestDBSetBuildFlags(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestSetBuildFlags(t *testing.T) {
 	}
 }
 
-func TestSetBuildCompletedTimestamp(t *testing.T) {
+func TestDBSetBuildCompletedTimestamp(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestSetBuildCompletedTimestamp(t *testing.T) {
 	}
 }
 
-func TestSetBuildState(t *testing.T) {
+func TestDBSetBuildState(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -103,7 +103,7 @@ func TestSetBuildState(t *testing.T) {
 	}
 }
 
-func TestSetBuildTimeMetric(t *testing.T) {
+func TestDBSetBuildTimeMetric(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -125,7 +125,7 @@ func TestSetBuildTimeMetric(t *testing.T) {
 	}
 }
 
-func TestSetDockerImageSizesMetric(t *testing.T) {
+func TestDBSetDockerImageSizesMetric(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -141,7 +141,7 @@ func TestSetDockerImageSizesMetric(t *testing.T) {
 	}
 }
 
-func TestSaveBuildOutput(t *testing.T) {
+func TestDBSaveBuildOutput(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
@@ -175,7 +175,7 @@ func TestSaveBuildOutput(t *testing.T) {
 	}
 }
 
-func TestGetBuildOutput(t *testing.T) {
+func TestDBGetBuildOutput(t *testing.T) {
 	dl := NewDBLayer(ts)
 	id, err := dl.CreateBuild(tbr)
 	if err != nil {
