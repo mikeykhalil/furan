@@ -113,10 +113,10 @@ func s3pull(cmd *cobra.Command, args []string) {
 
 	logger.Printf("loading into Docker daemon")
 	resp, err := dc.ImageLoad(context.Background(), bufr, true)
-	defer resp.Body.Close()
 	if err != nil {
 		clierr("error loading image: %v", err)
 	}
+	defer resp.Body.Close()
 	_, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		clierr("error reading Docker daemon response: %v", err)

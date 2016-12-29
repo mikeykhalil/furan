@@ -84,5 +84,10 @@ func (lss *LocalServerStream) SendHeader(metadata.MD) error {
 }
 
 // unused
+func (lss *LocalServerStream) SetHeader(metadata.MD) error {
+	return nil
+}
+
+// unused
 func (lss *LocalServerStream) SetTrailer(metadata.MD) {
 }
