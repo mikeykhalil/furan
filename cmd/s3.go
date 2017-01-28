@@ -41,9 +41,10 @@ type ObjectStorageManger interface {
 
 // S3Options contains the information needed to push/pull an image from S3
 type S3Options struct {
-	Region    string
-	Bucket    string
-	KeyPrefix string
+	Region     string
+	Bucket     string
+	KeyPrefix  string
+	PresignTTL time.Duration // In Minutes
 }
 
 // S3StorageManager is an object capable of pushing/pulling from S3
@@ -188,6 +189,17 @@ func (sm *S3StorageManager) pushdata(key string, contentType string, in io.Reade
 	return uo.Location, nil
 }
 
+func (sm *S3StorageManager) presignedURL(key string, s3opts *S3Options) (string, error) {
+	sess := sm.getSession(s3opts.Region)
+	svc := s3.New(sess)
+	req, _ := svc.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: &s3opts.Bucket,
+		Key:    &key,
+	})
+
+	return req.Presign(s3opts.PresignTTL * time.Minute)
+}
+
 // WriteFile writes a named file to the configured bucket and returns the S3 location URL
 func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, contentType string, in io.Reader, opts interface{}) (string, error) {
 	started := time.Now().UTC()
@@ -195,10 +207,20 @@ func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, conten
 	if err != nil {
 		return "", err
 	}
-	loc, err := sm.pushdata(name, contentType, in, s3opts, s3.BucketCannedACLPublicRead)
+
+	key := fmt.Sprintf("%v%v", s3opts.KeyPrefix, name)
+	loc, err := sm.pushdata(key, contentType, in, s3opts, s3.BucketCannedACLPrivate)
 	if err != nil {
 		return "", err
 	}
+
+	if s3opts.PresignTTL > 0 {
+		loc, err = sm.presignedURL(key, s3opts)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	d := time.Now().UTC().Sub(started).Seconds()
 	sm.mc.Duration("s3.write_file.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
 	return loc, nil
