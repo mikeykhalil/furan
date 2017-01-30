@@ -31,6 +31,7 @@ type serverconfig struct {
 	s3ErrorLogs         bool
 	s3ErrorLogBucket    string
 	s3ErrorLogRegion    string
+	s3PresignTTL        uint
 	gcIntervalSecs      uint
 	dockerDiskPath      string
 }
@@ -75,6 +76,7 @@ func init() {
 	serverCmd.PersistentFlags().BoolVar(&serverConfig.s3ErrorLogs, "s3-error-logs", false, "Upload failed build logs to S3 (region and bucket must be specified)")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.s3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.s3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.s3PresignTTL, "s3-error-log-presign-ttl", 60*4, "Presigned error log URL TTL in minutes (0 to disable)")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.gcIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.dockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
 	RootCmd.AddCommand(serverCmd)
@@ -109,9 +111,10 @@ func startgRPC(mc MetricsCollector, dc ImageBuildClient) {
 	osm := NewS3StorageManager(awsConfig, mc, logger)
 	is := NewDockerImageSquasher(logger)
 	s3errcfg := S3ErrorLogConfig{
-		PushToS3: serverConfig.s3ErrorLogs,
-		Region:   serverConfig.s3ErrorLogRegion,
-		Bucket:   serverConfig.s3ErrorLogBucket,
+		PushToS3:          serverConfig.s3ErrorLogs,
+		Region:            serverConfig.s3ErrorLogRegion,
+		Bucket:            serverConfig.s3ErrorLogBucket,
+		PresignTTLMinutes: serverConfig.s3PresignTTL,
 	}
 	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
 	if err != nil {

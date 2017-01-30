@@ -67,9 +67,10 @@ type ImageBuildPusher interface {
 }
 
 type S3ErrorLogConfig struct {
-	PushToS3 bool
-	Region   string
-	Bucket   string
+	PushToS3          bool
+	PresignTTLMinutes uint
+	Region            string
+	Bucket            string
 }
 
 // ImageBuilder is an object that builds and pushes images
@@ -288,9 +289,10 @@ func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref s
 	}
 	now := time.Now().UTC()
 	s3opts := &S3Options{
-		Region:    ib.s3errorcfg.Region,
-		Bucket:    ib.s3errorcfg.Bucket,
-		KeyPrefix: now.Round(time.Hour).Format(time.RFC3339) + "/",
+		Region:            ib.s3errorcfg.Region,
+		Bucket:            ib.s3errorcfg.Bucket,
+		KeyPrefix:         now.Round(time.Hour).Format(time.RFC3339) + "/",
+		PresignTTLMinutes: ib.s3errorcfg.PresignTTLMinutes,
 	}
 	key := fmt.Sprintf("%v-%v-error.txt", id.String(), action.String())
 	return ib.osm.WriteFile(key, idesc, "text/plain", b, s3opts)

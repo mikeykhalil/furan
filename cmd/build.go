@@ -40,6 +40,7 @@ DOCKER_CERT_PATH
 
 var buildS3ErrorLogs bool
 var buildS3ErrorLogRegion, buildS3ErrorLogBucket string
+var buildS3ErrorLogsPresignTTL uint
 
 func init() {
 	buildCmd.PersistentFlags().StringVar(&cliBuildRequest.Build.GithubRepo, "github-repo", "", "source github repo")
@@ -54,6 +55,7 @@ func init() {
 	buildCmd.PersistentFlags().BoolVar(&buildS3ErrorLogs, "s3-error-logs", false, "Upload failed build logs to S3 (region and bucket must be specified)")
 	buildCmd.PersistentFlags().StringVar(&buildS3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
 	buildCmd.PersistentFlags().StringVar(&buildS3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
+	buildCmd.PersistentFlags().UintVar(&buildS3ErrorLogsPresignTTL, "s3-error-log-presign-ttl", 60*4, "Presigned error log URL TTL in minutes (0 to disable)")
 	RootCmd.AddCommand(buildCmd)
 }
 
@@ -119,6 +121,7 @@ func build(cmd *cobra.Command, args []string) {
 		PushToS3: buildS3ErrorLogs,
 		Region:   buildS3ErrorLogRegion,
 		Bucket:   buildS3ErrorLogBucket,
+		PresignTTLMinutes: buildS3ErrorLogsPresignTTL,
 	}
 	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
 	if err != nil {

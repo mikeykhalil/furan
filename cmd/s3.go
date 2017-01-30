@@ -41,10 +41,10 @@ type ObjectStorageManger interface {
 
 // S3Options contains the information needed to push/pull an image from S3
 type S3Options struct {
-	Region     string
-	Bucket     string
-	KeyPrefix  string
-	PresignTTL time.Duration // In Minutes
+	Region            string
+	Bucket            string
+	KeyPrefix         string
+	PresignTTLMinutes uint
 }
 
 // S3StorageManager is an object capable of pushing/pulling from S3
@@ -197,7 +197,7 @@ func (sm *S3StorageManager) presignedURL(key string, s3opts *S3Options) (string,
 		Key:    &key,
 	})
 
-	return req.Presign(s3opts.PresignTTL * time.Minute)
+	return req.Presign(time.Duration(s3opts.PresignTTLMinutes) * time.Minute)
 }
 
 // WriteFile writes a named file to the configured bucket and returns the S3 location URL
@@ -214,7 +214,7 @@ func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, conten
 		return "", err
 	}
 
-	if s3opts.PresignTTL > 0 {
+	if s3opts.PresignTTLMinutes > 0 {
 		loc, err = sm.presignedURL(key, s3opts)
 		if err != nil {
 			return "", err
