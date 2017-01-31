@@ -90,15 +90,6 @@ func build(cmd *cobra.Command, args []string) {
 	validateCLIBuildRequest()
 	setupVault()
 	setupDB(initializeDB)
-	mc, err := NewDatadogCollector(dogstatsdAddr)
-	if err != nil {
-		log.Fatalf("error creating Datadog collector: %v", err)
-	}
-	setupKafka(mc)
-	err = getDockercfg()
-	if err != nil {
-		clierr("Error getting dockercfg: %v", err)
-	}
 
 	dnull, err := os.Open(os.DevNull)
 	if err != nil {
@@ -109,6 +100,16 @@ func build(cmd *cobra.Command, args []string) {
 	logger = log.New(dnull, "", log.LstdFlags)
 	clogger := log.New(os.Stderr, "", log.LstdFlags)
 
+	mc, err := NewDatadogCollector(dogstatsdAddr)
+	if err != nil {
+		log.Fatalf("error creating Datadog collector: %v", err)
+	}
+	setupKafka(mc)
+	err = getDockercfg()
+	if err != nil {
+		clierr("Error getting dockercfg: %v", err)
+	}
+
 	gf := NewGitHubFetcher(gitConfig.token)
 	dc, err := docker.NewEnvClient()
 	if err != nil {
@@ -118,9 +119,9 @@ func build(cmd *cobra.Command, args []string) {
 	osm := NewS3StorageManager(awsConfig, mc, clogger)
 	is := NewDockerImageSquasher(clogger)
 	s3errcfg := S3ErrorLogConfig{
-		PushToS3: buildS3ErrorLogs,
-		Region:   buildS3ErrorLogRegion,
-		Bucket:   buildS3ErrorLogBucket,
+		PushToS3:          buildS3ErrorLogs,
+		Region:            buildS3ErrorLogRegion,
+		Bucket:            buildS3ErrorLogBucket,
 		PresignTTLMinutes: buildS3ErrorLogsPresignTTL,
 	}
 	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
