@@ -25,6 +25,7 @@ type MetricsCollector interface {
 	GCUntaggedImageRemoved() error
 	GCBytesReclaimed(uint64) error
 	DiskFree(uint64) error
+	FileNodesFree(uint64) error
 }
 
 // DatadogCollector represents a collector that pushes metrics to Datadog
@@ -119,4 +120,9 @@ func (dc *DatadogCollector) GCBytesReclaimed(size uint64) error {
 // DiskFree reports the amount of disk space left on the Docker volume
 func (dc *DatadogCollector) DiskFree(bytes uint64) error {
 	return dc.c.Histogram("disk_bytes_free", float64(bytes), nil, 1)
+}
+
+// FileNodesFree reports the number of file nodes (inodes) left on the Docker volume
+func (dc *DatadogCollector) FileNodesFree(nodes uint64) error {
+	return dc.c.Histogram("file_nodes_free", float64(nodes), nil, 1)
 }
