@@ -186,7 +186,13 @@ func teardownTestDB() {
 }
 
 func TestMain(m *testing.M) {
-	setupTestDB()
-	defer teardownTestDB()
-	m.Run()
+	var exit int
+	defer func() {
+		os.Exit(exit)
+	}()
+	if tn != "" {
+		setupTestDB()
+		defer teardownTestDB()
+	}
+	exit = m.Run()
 }

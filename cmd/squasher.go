@@ -95,9 +95,9 @@ func (dt *DeserializedTar) Append(te *TarEntry) error {
 	if _, ok := dt.Content[n]; ok {
 		return fmt.Errorf("entry already exists: %v", n)
 	}
-	te.Index = uint64(len(dt.Order))
-	dt.Content[n] = te
 	dt.Order = append(dt.Order, n)
+	te.Index = uint64(len(dt.Order) - 1)
+	dt.Content[n] = te
 	return nil
 }
 
@@ -110,7 +110,10 @@ func (dt *DeserializedTar) Remove(p string) error {
 	if idx >= uint64(len(dt.Order)) {
 		return fmt.Errorf("bad index for entry: %v (length of ordered entries: %v)", idx, len(dt.Order))
 	}
-	dt.Order = append(dt.Order[:idx], dt.Order[:idx+1]...)
+	for _, p := range dt.Order[idx+1:] {
+		dt.Content[p].Index--
+	}
+	dt.Order = append(dt.Order[:idx], dt.Order[idx+1:]...)
 	delete(dt.Content, p)
 	return nil
 }
@@ -528,11 +531,12 @@ func (dis *DockerImageSquasher) processLayer(ctx context.Context, layertar []byt
 		e := layer.Content[p]
 		bn = path.Base(e.Header.Name)
 		if strings.HasPrefix(bn, ".wh.") {
+			dis.logf("bn: %v", bn)
 			wt = strings.Replace(e.Header.Name, ".wh.", "", 2) // I've seen "double whiteouts" in the wild
 			if _, ok = output.Content[wt]; !ok {
 				wt = fmt.Sprintf("%v/", wt) // directory whiteouts need a slash appended
 				if _, ok = output.Content[wt]; !ok {
-					dis.logf("warning: target not found for whiteout 2: %v\n", e.Header.Name)
+					dis.logf("warning: target not found for whiteout: %v\n", e.Header.Name)
 					continue
 				}
 			}
