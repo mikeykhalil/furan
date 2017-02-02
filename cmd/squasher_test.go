@@ -99,7 +99,7 @@ func dockerImageLoad(input io.Reader) error {
 	return nil
 }
 
-func TestSquasherFunctional_python3(t *testing.T) {
+func TestSquasherFunctional(t *testing.T) {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	sqsh := NewDockerImageSquasher(logger)
 	f, err := os.Open("./testdata/python-3.tar.gz")
@@ -116,7 +116,7 @@ func TestSquasherFunctional_python3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error squashing: %v", err)
 	}
-	t.Logf("squasher: python3: layers removed: %v; size diff: %v; size pct diff: %v", info.LayersRemoved, info.SizeDifference, info.SizePctDifference)
+	t.Logf("squasher: layers removed: %v; whiteouts: %v; files removed: %v; input bytes: %v, output bytes: %v; size diff: %v; size pct diff: %v", info.LayersRemoved, len(info.FilesRemoved), info.FilesRemovedCount, info.InputBytes, info.OutputBytes, info.SizeDifference, info.SizePctDifference)
 	err = dockerImageLoad(&output)
 	if err != nil {
 		t.Fatalf("error loading squashed image: %v", err)

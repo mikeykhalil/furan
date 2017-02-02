@@ -531,7 +531,6 @@ func (dis *DockerImageSquasher) processLayer(ctx context.Context, layertar []byt
 		e := layer.Content[p]
 		bn = path.Base(e.Header.Name)
 		if strings.HasPrefix(bn, ".wh.") {
-			dis.logf("bn: %v", bn)
 			wt = strings.Replace(e.Header.Name, ".wh.", "", 2) // I've seen "double whiteouts" in the wild
 			if _, ok = output.Content[wt]; !ok {
 				wt = fmt.Sprintf("%v/", wt) // directory whiteouts need a slash appended
@@ -544,8 +543,19 @@ func (dis *DockerImageSquasher) processLayer(ctx context.Context, layertar []byt
 				Name: wt,
 				Size: uint64(output.Content[wt].Header.Size),
 			})
-			output.Remove(wt)
+			if err := output.Remove(wt); err != nil {
+				return wl, fmt.Errorf("error removing whiteout: %v: %v", wt, err)
+			}
+		} else {
+			if _, ok := output.Content[e.Header.Name]; !ok {
+				if err := output.Append(e); err != nil {
+					return wl, fmt.Errorf("error appending layer file: %v: %v", e.Header.Name, err)
+				}
+			}
 		}
+	}
+	if len(wl) > 0 {
+		dis.logf("found %v whiteouts", len(wl))
 	}
 	return wl, nil
 }
