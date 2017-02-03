@@ -68,6 +68,83 @@ type WhiteoutFile struct {
 	Size uint64 // Size in bytes
 }
 
+// TarEntry represents a deserialized tar entry
+type TarEntry struct {
+	Header   *tar.Header // tar header
+	Contents []byte      // file contents
+	Index    uint64      // index within the stream
+}
+
+// DeserializedTar represents a deserialized tar stream
+type DeserializedTar struct {
+	Content map[string]*TarEntry // map of path -> entry
+	Order   []string             // paths in the order they are read in the stream
+}
+
+// NewDeserializedTar returns an initialized empty DeserializedTar
+func NewDeserializedTar() *DeserializedTar {
+	return &DeserializedTar{
+		Content: make(map[string]*TarEntry),
+		Order:   []string{},
+	}
+}
+
+// Append adds a new entry to the end of the tar stream
+func (dt *DeserializedTar) Append(te *TarEntry) error {
+	n := te.Header.Name
+	if _, ok := dt.Content[n]; ok {
+		return fmt.Errorf("entry already exists: %v", n)
+	}
+	dt.Order = append(dt.Order, n)
+	te.Index = uint64(len(dt.Order) - 1)
+	dt.Content[n] = te
+	return nil
+}
+
+// Remove deletes the entry p from the tar file
+func (dt *DeserializedTar) Remove(p string) error {
+	if _, ok := dt.Content[p]; !ok {
+		return fmt.Errorf("entry not found: %v", p)
+	}
+	idx := dt.Content[p].Index
+	if idx >= uint64(len(dt.Order)) {
+		return fmt.Errorf("bad index for entry: %v (length of ordered entries: %v)", idx, len(dt.Order))
+	}
+	for _, p := range dt.Order[idx+1:] {
+		dt.Content[p].Index--
+	}
+	dt.Order = append(dt.Order[:idx], dt.Order[idx+1:]...)
+	delete(dt.Content, p)
+	return nil
+}
+
+// Serialize writes the serialized tar stream to output
+func (dt *DeserializedTar) Serialize(output io.Writer) (int64, error) {
+	var tsz int64
+	var i int
+	w := tar.NewWriter(output)
+	defer w.Close()
+	for _, p := range dt.Order {
+		v, ok := dt.Content[p]
+		if !ok {
+			return 0, fmt.Errorf("path not found in Content: %v", p)
+		}
+		v.Header.Size = int64(len(v.Contents))
+		err := w.WriteHeader(v.Header)
+		if err != nil {
+			return tsz, fmt.Errorf("error writing layer tar header: %v: %v", p, err)
+		}
+		i, err = w.Write(v.Contents)
+		if err != nil {
+			return tsz, fmt.Errorf("error writing layer tar content: %v: %v", p, err)
+		}
+		tsz += int64(i)
+
+	}
+	w.Flush()
+	return tsz, nil
+}
+
 // SquashInfo represents data about an individual squashing operation
 type SquashInfo struct {
 	InputBytes        uint64
@@ -110,13 +187,13 @@ func (dis *DockerImageSquasher) Squash(ctx context.Context, input io.Reader, out
 
 	sinfo := &SquashInfo{}
 
-	imap, insz, err := dis.unpackToMap(ctx, input)
+	inobj, insz, err := dis.DeserializeTarStream(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("error unpacking input: %v", err)
 	}
 	sinfo.InputBytes = uint64(insz)
 
-	mentry, ok := imap["manifest.json"]
+	mentry, ok := inobj.Content["manifest.json"]
 	if !ok {
 		return nil, fmt.Errorf("manifest.json not found in image archive")
 	}
@@ -144,7 +221,7 @@ func (dis *DockerImageSquasher) Squash(ctx context.Context, input io.Reader, out
 	sinfo.LayersRemoved = uint(len(rmlayers))
 
 	// Iterate through layers, unpacking and processing whiteouts
-	flc, wl, err := dis.processLayers(ctx, imap, &manifest)
+	flc, wl, err := dis.processLayers(ctx, inobj, &manifest)
 	if err != nil {
 		return nil, fmt.Errorf("error processing layers: %v", err)
 	}
@@ -152,19 +229,19 @@ func (dis *DockerImageSquasher) Squash(ctx context.Context, input io.Reader, out
 	sinfo.FilesRemoved = wl
 
 	// Get a map of final layer tar entries suitable for merging/replacing into imap
-	flmap, err := dis.constructFinalLayer(ctx, &manifest, imap, flc)
+	flobj, err := dis.constructFinalLayer(ctx, &manifest, inobj, flc)
 	if err != nil {
 		return nil, fmt.Errorf("error serializing final layer: %v", err)
 	}
 
 	// Adjust metadata for final image
-	mdmap, err := dis.adjustMetadata(ctx, &manifest, imap, flmap)
+	mdobj, err := dis.adjustMetadata(ctx, &manifest, inobj, flobj)
 	if err != nil {
 		return nil, fmt.Errorf("error adjusting image metadata: %v", err)
 	}
 
 	// Merge all tar entry maps and serialize into tar stream
-	sz, err := dis.finalImage(ctx, imap, flmap, mdmap, rmlayers, output)
+	sz, err := dis.finalImage(ctx, inobj, flobj, mdobj, rmlayers, output)
 	if err != nil {
 		return nil, fmt.Errorf("error finalizing image: %v", err)
 	}
@@ -194,22 +271,22 @@ func (dis *DockerImageSquasher) finalLayerID(manifest *DockerImageManifest) stri
 // finalImage takes the original input map and merges in the maps produced in
 // previous steps, removes squashed layers and then serializes the result into a tar stream
 // written to output. Returns the count of bytes written (not including tar metadata)
-func (dis *DockerImageSquasher) finalImage(ctx context.Context, imap map[string]*tarEntry, flmap map[string]*tarEntry, mdmap map[string]*tarEntry, rmlayers []string, output io.Writer) (int64, error) {
+func (dis *DockerImageSquasher) finalImage(ctx context.Context, input *DeserializedTar, flayer *DeserializedTar, mdata *DeserializedTar, rmlayers []string, output io.Writer) (int64, error) {
 	if isCancelled(ctx.Done()) {
 		return 0, fmt.Errorf("squash was cancelled")
 	}
 	dis.logf("inserting final squashed layer and removing unneeded layers")
-	for k, v := range flmap {
-		if _, ok := imap[k]; !ok {
+	for k, v := range flayer.Content {
+		if _, ok := input.Content[k]; !ok {
 			return 0, fmt.Errorf("file from processed final layer missing from input map: %v", k)
 		}
-		imap[k] = v
+		input.Content[k] = v
 	}
-	for k, v := range mdmap {
-		if _, ok := imap[k]; !ok {
+	for k, v := range mdata.Content {
+		if _, ok := input.Content[k]; !ok {
 			return 0, fmt.Errorf("file from image metadata missing from input map: %v", k)
 		}
-		imap[k] = v
+		input.Content[k] = v
 	}
 	var jn, vn, tn, ldir, l, v string
 	var ok bool
@@ -219,13 +296,15 @@ func (dis *DockerImageSquasher) finalImage(ctx context.Context, imap map[string]
 		tn = fmt.Sprintf("%v/layer.tar", l)
 		ldir = fmt.Sprintf("%v/", l)
 		for _, v = range []string{jn, vn, tn, ldir} {
-			if _, ok = imap[v]; !ok {
+			if _, ok = input.Content[v]; !ok {
 				return 0, fmt.Errorf("removing layer: file missing from input map: %v", v)
 			}
-			delete(imap, v)
+			if err := input.Remove(v); err != nil {
+				return 0, fmt.Errorf("error removing item: %v", err)
+			}
 		}
 	}
-	sz, err := dis.serializeTarEntries(imap, output)
+	sz, err := input.Serialize(output)
 	if err != nil {
 		return 0, fmt.Errorf("error serializing final image: %v", err)
 	}
@@ -237,22 +316,22 @@ func (dis *DockerImageSquasher) finalImage(ctx context.Context, imap map[string]
 // Calculate new layer diff_id
 // remove all other diff_ids from top-level config
 // remove all other layers from manifest.json
-func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *DockerImageManifest, imap map[string]*tarEntry, flmap map[string]*tarEntry) (map[string]*tarEntry, error) {
+func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *DockerImageManifest, input *DeserializedTar, flayer *DeserializedTar) (*DeserializedTar, error) {
 	if isCancelled(ctx.Done()) {
 		return nil, fmt.Errorf("squash was cancelled")
 	}
 	dis.logf("adjusting metadata to be consistent with squashed layers")
-	out := make(map[string]*tarEntry)
+	out := NewDeserializedTar()
 	flid := dis.finalLayerID(manifest)
 	fln := fmt.Sprintf("%v/layer.tar", flid)
-	if _, ok := flmap[fln]; !ok {
+	if _, ok := flayer.Content[fln]; !ok {
 		return out, fmt.Errorf("final layer tar not found after serializing: %v", flid)
 	}
-	sum := sha256.Sum256(flmap[fln].Contents)
+	sum := sha256.Sum256(flayer.Content[fln].Contents)
 	diffid := fmt.Sprintf("sha256:%v", hex.EncodeToString(sum[:]))
 
 	config := DockerImageConfig{}
-	cent, ok := imap[manifest.Config]
+	cent, ok := input.Content[manifest.Config]
 	if !ok {
 		return out, fmt.Errorf("top level config not found in image archive: %v", manifest.Config)
 	}
@@ -272,7 +351,7 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 	if err != nil {
 		return out, fmt.Errorf("error marshaling image manifest: %v", err)
 	}
-	out[manifest.Config] = &tarEntry{
+	te := &TarEntry{
 		Header: &tar.Header{
 			Name:     manifest.Config,
 			Typeflag: tar.TypeReg,
@@ -280,7 +359,11 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 		},
 		Contents: cb,
 	}
-	out["manifest.json"] = &tarEntry{
+	err = out.Append(te)
+	if err != nil {
+		return out, fmt.Errorf("error appending to tar: %v", err)
+	}
+	te = &TarEntry{
 		Header: &tar.Header{
 			Name:     "manifest.json",
 			Typeflag: tar.TypeReg,
@@ -288,20 +371,24 @@ func (dis *DockerImageSquasher) adjustMetadata(ctx context.Context, manifest *Do
 		},
 		Contents: mb,
 	}
+	err = out.Append(te)
+	if err != nil {
+		return out, fmt.Errorf("error appending to tar: %v", err)
+	}
 	return out, nil
 }
 
 // constructFinalLayer takes the final layer contents ("{layer-id}/layer.tar"),
-// adjusts metadata, serializes and returns a map suitable for merging/replacing
+// adjusts metadata, serializes and returns a struct suitable for merging/replacing
 // into the original input
-func (dis *DockerImageSquasher) constructFinalLayer(ctx context.Context, manifest *DockerImageManifest, imap map[string]*tarEntry, flc map[string]*tarEntry) (map[string]*tarEntry, error) {
+func (dis *DockerImageSquasher) constructFinalLayer(ctx context.Context, manifest *DockerImageManifest, input *DeserializedTar, flayer *DeserializedTar) (*DeserializedTar, error) {
 	if isCancelled(ctx.Done()) {
 		return nil, fmt.Errorf("squash was cancelled")
 	}
 	dis.logf("constructing metadata for final layer")
 	flmd := DockerLayerJSON{}
 	flid := dis.finalLayerID(manifest)
-	flmdent, ok := imap[fmt.Sprintf("%v/json", flid)]
+	flmdent, ok := input.Content[fmt.Sprintf("%v/json", flid)]
 	if !ok {
 		return nil, fmt.Errorf("final layer json not found in image archive: %v", flid)
 	}
@@ -310,30 +397,31 @@ func (dis *DockerImageSquasher) constructFinalLayer(ctx context.Context, manifes
 		return nil, fmt.Errorf("error deserializing final layer json: %v", err)
 	}
 	vn := fmt.Sprintf("%v/VERSION", flid)
-	vent, ok := imap[vn]
+	vent, ok := input.Content[vn]
 	if !ok {
 		return nil, fmt.Errorf("final layer VERSION not found in image archive: %v", flid)
 	}
-	return dis.serializeFinalLayer(ctx, flc, &flmd, vent.Contents)
+	return dis.serializeFinalLayer(ctx, flayer, &flmd, vent.Contents)
 }
 
 // serializeFinalLayer takes the layer map, metadata and version and serializes
 // into the final layer.tar, json and VERSION tar entries
-func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer map[string]*tarEntry, md *DockerLayerJSON, version []byte) (map[string]*tarEntry, error) {
-	out := make(map[string]*tarEntry)
+func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer *DeserializedTar, md *DockerLayerJSON, version []byte) (*DeserializedTar, error) {
+	var te *TarEntry
+	out := NewDeserializedTar()
 	if isCancelled(ctx.Done()) {
 		return nil, fmt.Errorf("squash was cancelled")
 	}
 	dis.logf("creating final squashed layer filesystem image")
 	ltb := bytes.NewBuffer([]byte{})
-	_, err := dis.serializeTarEntries(layer, ltb)
+	_, err := layer.Serialize(ltb)
 	if err != nil {
 		return nil, fmt.Errorf("error serializing layer: %v", err)
 	}
 	layertar := ltb.Bytes()
 	md.Parent = ""
 	mdn := fmt.Sprintf("%v/", md.ID)
-	out[mdn] = &tarEntry{
+	te = &TarEntry{
 		Header: &tar.Header{
 			Name:     mdn,
 			Typeflag: tar.TypeDir,
@@ -341,12 +429,16 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 		},
 		Contents: []byte{},
 	}
+	err = out.Append(te)
+	if err != nil {
+		return out, fmt.Errorf("error appending tar entry: %v: %v", te.Header.Name, err)
+	}
 	mdb, err := json.Marshal(&md)
 	if err != nil {
 		return out, fmt.Errorf("error marshaling layer json: %v", err)
 	}
 	jn := fmt.Sprintf("%v/json", md.ID)
-	out[jn] = &tarEntry{
+	te = &TarEntry{
 		Header: &tar.Header{
 			Name:     jn,
 			Typeflag: tar.TypeReg,
@@ -355,8 +447,12 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 		},
 		Contents: mdb,
 	}
+	err = out.Append(te)
+	if err != nil {
+		return out, fmt.Errorf("error appending tar entry: %v: %v", te.Header.Name, err)
+	}
 	vn := fmt.Sprintf("%v/VERSION", md.ID)
-	out[vn] = &tarEntry{
+	te = &TarEntry{
 		Header: &tar.Header{
 			Name:     vn,
 			Typeflag: tar.TypeReg,
@@ -365,8 +461,12 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 		},
 		Contents: version,
 	}
+	err = out.Append(te)
+	if err != nil {
+		return out, fmt.Errorf("error appending tar entry: %v: %v", te.Header.Name, err)
+	}
 	tn := fmt.Sprintf("%v/layer.tar", md.ID)
-	out[tn] = &tarEntry{
+	te = &TarEntry{
 		Header: &tar.Header{
 			Name:     tn,
 			Typeflag: tar.TypeReg,
@@ -375,42 +475,22 @@ func (dis *DockerImageSquasher) serializeFinalLayer(ctx context.Context, layer m
 		},
 		Contents: layertar,
 	}
-	return out, nil
-}
-
-// serializeTarEntries produces a tar stream from a map of entries
-// returns the total bytes written (not including tar metadata)
-func (dis *DockerImageSquasher) serializeTarEntries(input map[string]*tarEntry, output io.Writer) (int64, error) {
-	var tsz int64
-	var i int
-	w := tar.NewWriter(output)
-	defer w.Close()
-	dis.logf("serializing tar entries")
-	for k, v := range input {
-		v.Header.Size = int64(len(v.Contents))
-		err := w.WriteHeader(v.Header)
-		if err != nil {
-			return tsz, fmt.Errorf("error writing layer tar header: %v: %v", k, err)
-		}
-		i, err = w.Write(v.Contents)
-		if err != nil {
-			return tsz, fmt.Errorf("error writing layer tar content: %v: %v", k, err)
-		}
-		tsz += int64(i)
+	err = out.Append(te)
+	if err != nil {
+		return out, fmt.Errorf("error appending tar entry: %v: %v", te.Header.Name, err)
 	}
-	w.Flush()
-	return tsz, nil
+	return out, nil
 }
 
 // processLayers iterates through the image layers in order, processing any whiteouts
 // present. Returns a map of tar entries suitable to be serialized into "{layer-id}/layer.tar"
 // and a list of files removed by whiteout during squashing
-func (dis *DockerImageSquasher) processLayers(ctx context.Context, imap map[string]*tarEntry, manifest *DockerImageManifest) (map[string]*tarEntry, []WhiteoutFile, error) {
+func (dis *DockerImageSquasher) processLayers(ctx context.Context, input *DeserializedTar, manifest *DockerImageManifest) (*DeserializedTar, []WhiteoutFile, error) {
 	var err error
 	var ok bool
 	var ldir string
 	var lwl, wl []WhiteoutFile
-	omap := make(map[string]*tarEntry)
+	output := NewDeserializedTar()
 	for _, l := range manifest.Layers {
 		if isCancelled(ctx.Done()) {
 			return nil, wl, fmt.Errorf("squash was cancelled")
@@ -419,97 +499,78 @@ func (dis *DockerImageSquasher) processLayers(ctx context.Context, imap map[stri
 			return nil, wl, fmt.Errorf("unexpected format for layer entry (expected '.../layer.tar'): %v", l)
 		}
 		ldir = strings.Replace(l, "layer.tar", "", 1)
-		_, ok = imap[ldir]
+		_, ok = input.Content[ldir]
 		if !ok {
 			return nil, wl, fmt.Errorf("layer directory not found in image archive: %v", ldir)
 		}
-		ltar, ok := imap[l]
+		ltar, ok := input.Content[l]
 		if !ok {
 			return nil, wl, fmt.Errorf("layer tar not found in image archive: %v", l)
 		}
 		dis.logf("processing layer %v", strings.Replace(l, "/layer.tar", "", 1))
-		lwl, err = dis.processLayer(ctx, ltar.Contents, omap)
+		lwl, err = dis.processLayer(ctx, ltar.Contents, output)
 		if err != nil {
 			return nil, wl, fmt.Errorf("error processing layer: %v: %v", l, err)
 		}
 		wl = append(wl, lwl...)
 	}
-	return omap, wl, nil
+	return output, wl, nil
 }
 
 // processLayer takes the input layer, unpacks to outputmap and processes any
 // whiteouts present
-func (dis *DockerImageSquasher) processLayer(ctx context.Context, layertar []byte, outputmap map[string]*tarEntry) ([]WhiteoutFile, error) {
-	var err error
+func (dis *DockerImageSquasher) processLayer(ctx context.Context, layertar []byte, output *DeserializedTar) ([]WhiteoutFile, error) {
 	var ok bool
-	var h *tar.Header
-	var e *tarEntry
-	var contents []byte
 	var bn, wt string
 	wl := []WhiteoutFile{}
-	r := tar.NewReader(bytes.NewBuffer(layertar))
-	for {
-		if isCancelled(ctx.Done()) {
-			return wl, fmt.Errorf("squash was cancelled")
-		}
-		h, err = r.Next()
-		if err != nil {
-			if err == io.EOF {
-				return wl, nil
-			}
-			return wl, fmt.Errorf("error getting next entry in layer tar: %v", err)
-		}
-		bn = path.Base(h.Name)
+	layer, _, err := dis.DeserializeTarStream(ctx, bytes.NewBuffer(layertar))
+	if err != nil {
+		return wl, fmt.Errorf("error deserializing layer tar: %v", err)
+	}
+	for _, p := range layer.Order {
+		e := layer.Content[p]
+		bn = path.Base(e.Header.Name)
 		if strings.HasPrefix(bn, ".wh.") {
-			wt = strings.Replace(h.Name, ".wh.", "", 2) // I've seen "double whiteouts" in the wild
-			if _, ok = outputmap[wt]; !ok {
+			wt = strings.Replace(e.Header.Name, ".wh.", "", 2) // I've seen "double whiteouts" in the wild
+			if _, ok = output.Content[wt]; !ok {
 				wt = fmt.Sprintf("%v/", wt) // directory whiteouts need a slash appended
-				if _, ok = outputmap[wt]; !ok {
-					dis.logf("warning: target not found for whiteout 2: %v\n", h.Name)
+				if _, ok = output.Content[wt]; !ok {
+					dis.logf("warning: target not found for whiteout: %v\n", e.Header.Name)
 					continue
 				}
 			}
 			wl = append(wl, WhiteoutFile{
 				Name: wt,
-				Size: uint64(outputmap[wt].Header.Size),
+				Size: uint64(output.Content[wt].Header.Size),
 			})
-			delete(outputmap, wt)
-			continue
-		}
-		if h.Typeflag == tar.TypeReg || h.Typeflag == tar.TypeRegA {
-			contents, err = ioutil.ReadAll(r)
-			if err != nil {
-				return wl, fmt.Errorf("error reading tar entry contents: %v", err)
-			}
-			if int64(len(contents)) != h.Size {
-				return wl, fmt.Errorf("tar entry size mismatch: %v: read %v (size: %v)", h.Name, len(contents), h.Size)
+			if err := output.Remove(wt); err != nil {
+				return wl, fmt.Errorf("error removing whiteout: %v: %v", wt, err)
 			}
 		} else {
-			contents = []byte{}
+			if _, ok := output.Content[e.Header.Name]; !ok {
+				if err := output.Append(e); err != nil {
+					return wl, fmt.Errorf("error appending layer file: %v: %v", e.Header.Name, err)
+				}
+			}
 		}
-		e = &tarEntry{
-			Header:   h,
-			Contents: contents,
-		}
-		outputmap[h.Name] = e
 	}
+	if len(wl) > 0 {
+		dis.logf("found %v whiteouts", len(wl))
+	}
+	return wl, nil
 }
 
-type tarEntry struct {
-	Header   *tar.Header
-	Contents []byte
-}
-
-// Deserialize a tar stream into a map of filepath -> content
-// returns the map and the total bytes read (not including tar metadata)
-func (dis *DockerImageSquasher) unpackToMap(ctx context.Context, in io.Reader) (map[string]*tarEntry, int64, error) {
+// DeserializeTarStream deserializes a tar stream
+// returns the struct and the total bytes read (not including tar metadata)
+func (dis *DockerImageSquasher) DeserializeTarStream(ctx context.Context, in io.Reader) (*DeserializedTar, int64, error) {
 	var err error
 	var h *tar.Header
-	var e *tarEntry
+	var e *TarEntry
 	var contents []byte
 	var tsz int64
-	out := make(map[string]*tarEntry)
+	out := NewDeserializedTar()
 	r := tar.NewReader(in)
+	index := uint64(0)
 	dis.logf("unpacking input")
 	for {
 		if isCancelled(ctx.Done()) {
@@ -537,10 +598,13 @@ func (dis *DockerImageSquasher) unpackToMap(ctx context.Context, in io.Reader) (
 		} else {
 			contents = []byte{}
 		}
-		e = &tarEntry{
+		e = &TarEntry{
 			Header:   h,
 			Contents: contents,
+			Index:    index,
 		}
-		out[h.Name] = e
+		out.Content[h.Name] = e
+		out.Order = append(out.Order, h.Name)
+		index++
 	}
 }

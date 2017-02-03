@@ -1,3 +1,4 @@
 furan
 cmd/models.pb.go
 req.json
+cmd/testdata/*.tar.gz
