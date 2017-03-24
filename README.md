@@ -1,28 +1,34 @@
-<center>![Furan](https://s3.amazonaws.com/dsc-misc/furan.jpg)</center>
+<p align="center">
+<img with="304" height="300" src="https://s3-us-west-2.amazonaws.com/s.cdpn.io/12437/furan_icon.svg" alt="Furan" />
+</p>
+<h1 align="center">Furan</h1>
 
-Furan builds and pushes Docker images from the specified GitHub repository
-to the specified target.
+-----
 
-**Why use Furan? What advantages are there?**
+<h4 align="center">Furan builds and pushes Docker images from a specified GitHub repository
+to a specified target.</h4>
 
-- Furan is optimized for build speed. It can be configured to run all builds within a RAM disk and streams directly from GitHub to the local Docker daemon without temporary files.
+-----
 
-- Furan is deployed as an essentially stateless API application, allowing it to be painlessly scaled out as needed.
+<h3 align="center">&middot;&middot;&middot;</h3>
 
-- Furan can be triggered on demand or can be hooked into GitHub events.
+## What is Furan's advantage?
 
-- Furan supports pushing to Docker registries as well as pre-squashing and deploying
-directly to S3.
+-  **Furan is fast!** Optimized for build speed, Furan can be configured to run all builds within a RAM disk and streams directly from GitHub to a local Docker daemon without temporary files.
 
-Dependencies
-------------
+-  **Furan is stateless!** Furan is deployed as an essentially stateless API application, allowing it to be scaled out.
 
-- Cassandra 2.x (ScyllaDB 1.x)
-- Kafka 0.9.x
-- Docker 1.6+
+-  **Furan is hookable!** Furan can be triggered on demand or hooked into GitHub events.
 
-API
----
+-  **Furan supports Docker pushs and S3 Deploys!** Furan supports pushing to Docker registries as well as pre-squashing and deploying directly to S3.
+
+## Dependencies 
+
+-  Cassandra 2.x (ScyllaDB 1.x)
+-  Kafka 0.9.x
+-  Docker 1.6+
+
+## API 
 
 The native API for Furan is based on [gRPC](http://www.grpc.io) and supports
 a number of RPC calls. See the [protobuf definition](https://github.com/dollarshaveclub/furan/blob/master/protos/models.proto#L5-L10)
@@ -31,8 +37,7 @@ for details.
 An [HTTPS adapter](https://github.com/dollarshaveclub/furan/blob/master/HTTP-API.md) is
 available for testing convenience.
 
-CLI
----
+## CLI
 
 See the help output for full details:
 
