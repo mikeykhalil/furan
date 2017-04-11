@@ -14,9 +14,9 @@ to a specified target.</h4>
 
 ## What is Furan's advantage?
 
--  **Furan is fast!** Optimized for build speed, Furan prefers to run operations in memory instead of disk and can be optionally configured to run all builds within a RAM disk. Furan streams directly from GitHub to a local Docker daemon without temporary files.
+-  **Furan is fast!** Optimized for build speed, Furan runs operations in memory instead of disk. Optionally, it can be configured to run all builds within a RAM disk. Furan streams directly from GitHub to a local Docker daemon without temporary files.
 
--  **Furan is stateless!** Furan is deployed as an essentially stateless API application, allowing it to be scaled out easily. Furan never shells out to execute docker commands but instead leverages the Docker Engine API.
+-  **Furan is stateless!** Furan is deployed as an essentially stateless API application, allowing it to be scaled out. Furan does not shell out to execute docker commands. It leverages the Docker Engine API.
 
 -  **Furan is hookable!** Furan is triggered on demand via GRPC or HTTPS. Builds can be triggered on one node and monitored on any other (allows round-robin load balancing).
 
@@ -40,8 +40,8 @@ for details.
 An [HTTPS adapter](https://github.com/dollarshaveclub/furan/blob/master/HTTP-API.md) is
 available for testing convenience.
 
-# Getting Started
-
+## Docs
+-  [Quick Start](https://github.com/dollarshaveclub/furan/blob/master/docs/QUICKSTART.md)
 
 ## CLI
 
