@@ -1,10 +1,9 @@
-package cmd
+package lib
 
 import (
 	"bytes"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/Shopify/sarama"
@@ -21,28 +20,6 @@ const (
 )
 
 var kafkaVersion = sarama.V0_10_0_0
-
-type kafkaconfig struct {
-	brokers      []string
-	topic        string
-	manager      EventBusManager
-	maxOpenSends uint
-}
-
-func setupKafka(mc MetricsCollector) {
-	kafkaConfig.brokers = strings.Split(kafkaBrokerStr, ",")
-	if len(kafkaConfig.brokers) < 1 {
-		log.Fatalf("At least one Kafka broker is required")
-	}
-	if kafkaConfig.topic == "" {
-		log.Fatalf("Kafka topic is required")
-	}
-	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends, mc, logger)
-	if err != nil {
-		log.Fatalf("Error creating Kafka producer: %v", err)
-	}
-	kafkaConfig.manager = kp
-}
 
 // EventBusProducer describes an object capable of publishing events somewhere
 type EventBusProducer interface {
@@ -76,9 +53,9 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint, mc MetricsCo
 	pconf.Version = kafkaVersion
 
 	pconf.Net.MaxOpenRequests = int(maxsends)
-	pconf.Net.DialTimeout = connTimeoutSecs * time.Second
-	pconf.Net.ReadTimeout = connTimeoutSecs * time.Second
-	pconf.Net.WriteTimeout = connTimeoutSecs * time.Second
+	pconf.Net.DialTimeout = connectTimeoutSecs * time.Second
+	pconf.Net.ReadTimeout = connectTimeoutSecs * time.Second
+	pconf.Net.WriteTimeout = connectTimeoutSecs * time.Second
 	pconf.Net.KeepAlive = keepaliveSecs * time.Second
 
 	pconf.Producer.Return.Errors = true
@@ -98,7 +75,7 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint, mc MetricsCo
 	kp := &KafkaManager{
 		ap:           asyncp,
 		topic:        topic,
-		brokers:      kafkaConfig.brokers,
+		brokers:      brokers,
 		consumerConf: cconf,
 		mc:           mc,
 		logger:       logger,

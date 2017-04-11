@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	docker "github.com/docker/engine-api/client"
+	"github.com/dollarshaveclub/furan/lib"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 )
@@ -88,8 +89,8 @@ func build(cmd *cobra.Command, args []string) {
 	}()
 
 	validateCLIBuildRequest()
-	setupVault()
-	setupDB(initializeDB)
+	lib.setupVault()
+	lib.setupDB(initializeDB)
 
 	dnull, err := os.Open(os.DevNull)
 	if err != nil {
@@ -100,17 +101,17 @@ func build(cmd *cobra.Command, args []string) {
 	logger = log.New(dnull, "", log.LstdFlags)
 	clogger := log.New(os.Stderr, "", log.LstdFlags)
 
-	mc, err := NewDatadogCollector(dogstatsdAddr)
+	mc, err := lib.NewDatadogCollector(dogstatsdAddr)
 	if err != nil {
 		log.Fatalf("error creating Datadog collector: %v", err)
 	}
-	setupKafka(mc)
+	lib.setupKafka(mc)
 	err = getDockercfg()
 	if err != nil {
 		clierr("Error getting dockercfg: %v", err)
 	}
 
-	gf := NewGitHubFetcher(gitConfig.token)
+	gf := lib.NewGitHubFetcher(gitConfig.token)
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		clierr("error creating Docker client: %v", err)

@@ -41,9 +41,6 @@ var kafkaConfig kafkaconfig
 
 var logger *log.Logger
 
-var version = "0"
-var description = "unknown"
-
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run Furan server",

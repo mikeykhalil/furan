@@ -4,37 +4,22 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
+	"time"
 
-	dtypes "github.com/docker/engine-api/types"
+	"github.com/dollarshaveclub/furan/lib"
+	"github.com/dollarshaveclub/go-lib/cassandra"
+	"github.com/gocql/gocql"
 	"github.com/spf13/cobra"
 )
 
-type vaultconfig struct {
-	addr            string
-	token           string
-	tokenAuth       bool
-	appID           string
-	userIDPath      string
-	vaultPathPrefix string
-}
-
-type gitconfig struct {
-	tokenVaultPath string
-	token          string // GitHub token
-}
-
-type dockerconfig struct {
-	dockercfgVaultPath string
-	dockercfgRaw       string
-	dockercfgContents  map[string]dtypes.AuthConfig
-}
-
-var vaultConfig vaultconfig
-var gitConfig gitconfig
-var dockerConfig dockerconfig
-var awsConfig AWSConfig
+var vaultConfig lib.Vaultconfig
+var gitConfig lib.Gitconfig
+var dockerConfig lib.Dockerconfig
+var awsConfig lib.AWSConfig
+var dbConfig lib.DBconfig
 
 var nodestr string
 var datacenterstr string
@@ -98,15 +83,6 @@ func clierr(msg string, params ...interface{}) {
 	os.Exit(1)
 }
 
-func isCancelled(done <-chan struct{}) bool {
-	select {
-	case <-done:
-		return true
-	default:
-		return false
-	}
-}
-
 func getDockercfg() error {
 	err := json.Unmarshal([]byte(dockerConfig.dockercfgRaw), &dockerConfig.dockercfgContents)
 	if err != nil {
@@ -131,4 +107,98 @@ func getDockercfg() error {
 		dockerConfig.dockercfgContents[k] = v
 	}
 	return nil
+}
+
+// GetNodesFromConsul queries the local Consul agent for the given service,
+// returning the healthy nodes in ascending order of network distance/latency
+func getNodesFromConsul(svc string) ([]string, error) {
+	nodes := []string{}
+	c, err := consul.NewClient(consul.DefaultConfig())
+	if err != nil {
+		return nodes, err
+	}
+	h := c.Health()
+	opts := &consul.QueryOptions{
+		Near: "_agent",
+	}
+	se, _, err := h.Service(svc, "", true, opts)
+	if err != nil {
+		return nodes, err
+	}
+	for _, s := range se {
+		nodes = append(nodes, s.Node.Address)
+	}
+	return nodes, nil
+}
+
+func connectToDB() {
+	if dbConfig.useConsul {
+		nodes, err := getNodesFromConsul(dbConfig.consulServiceName)
+		if err != nil {
+			log.Fatalf("error getting DB nodes: %v", err)
+		}
+		dbConfig.nodes = nodes
+	}
+	dbConfig.cluster = gocql.NewCluster(dbConfig.nodes...)
+	dbConfig.cluster.ProtoVersion = 3
+	dbConfig.cluster.NumConns = 20
+	dbConfig.cluster.SocketKeepalive = 30 * time.Second
+}
+
+func setupDataLayer() {
+	s, err := dbConfig.cluster.CreateSession()
+	if err != nil {
+		log.Fatalf("error creating DB session: %v", err)
+	}
+	dbConfig.datalayer = NewDBLayer(s)
+}
+
+func initDB() {
+	rfmap := map[string]uint{}
+	for _, dc := range dbConfig.dataCenters {
+		rfmap[dc] = dbConfig.rfPerDC
+	}
+	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.cluster, dbConfig.keyspace, rfmap)
+	if err != nil {
+		log.Fatalf("error creating keyspace: %v", err)
+	}
+	err = cassandra.CreateRequiredTypes(dbConfig.cluster, requiredUDTs)
+	if err != nil {
+		log.Fatalf("error creating UDTs: %v", err)
+	}
+	err = cassandra.CreateRequiredTables(dbConfig.cluster, requiredTables)
+	if err != nil {
+		log.Fatalf("error creating tables: %v", err)
+	}
+}
+
+func setupDB(initdb bool) {
+	dbConfig.nodes = strings.Split(nodestr, ",")
+	if !dbConfig.useConsul {
+		if len(dbConfig.nodes) == 0 || dbConfig.nodes[0] == "" {
+			log.Fatalf("cannot setup DB: Consul is disabled and node list is empty")
+		}
+	}
+	dbConfig.dataCenters = strings.Split(datacenterstr, ",")
+	connectToDB()
+	if initdb {
+		initDB()
+	}
+	dbConfig.cluster.Keyspace = dbConfig.keyspace
+	setupDataLayer()
+}
+
+func setupKafka(mc MetricsCollector) {
+	kafkaConfig.brokers = strings.Split(kafkaBrokerStr, ",")
+	if len(kafkaConfig.brokers) < 1 {
+		log.Fatalf("At least one Kafka broker is required")
+	}
+	if kafkaConfig.topic == "" {
+		log.Fatalf("Kafka topic is required")
+	}
+	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends, mc, logger)
+	if err != nil {
+		log.Fatalf("Error creating Kafka producer: %v", err)
+	}
+	kafkaConfig.manager = kp
 }

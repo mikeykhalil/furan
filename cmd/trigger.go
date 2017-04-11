@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	connTimeoutSecs        = 10
 	pollStatusIntervalSecs = 5
 )
 

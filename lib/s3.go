@@ -1,4 +1,4 @@
-package cmd
+package lib
 
 import (
 	"fmt"
@@ -16,13 +16,6 @@ import (
 const (
 	awsMaxRetries = 10
 )
-
-// AWSConfig contains all information needed to access AWS services
-type AWSConfig struct {
-	AccessKeyID     string
-	SecretAccessKey string
-	Concurrency     uint
-}
 
 // ImageDescription contains all info needed to find a specific image within the object store
 type ImageDescription struct {

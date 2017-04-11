@@ -1,4 +1,4 @@
-package cmd
+package lib
 
 /*
 Adapter to allow us to directly call a server stream gRPC method and get
