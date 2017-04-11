@@ -14,65 +14,35 @@ to a specified target.</h4>
 
 ## What is Furan's advantage?
 
--  **Furan is fast!** Optimized for build speed, Furan can be configured to run all builds within a RAM disk and streams directly from GitHub to a local Docker daemon without temporary files.
+-  **Furan is fast!** Optimized for build speed, Furan prefers to run operations in memory instead of disk and can be optionally configured to run all builds within a RAM disk. Furan streams directly from GitHub to a local Docker daemon without temporary files.
 
--  **Furan is stateless!** Furan is deployed as an essentially stateless API application, allowing it to be scaled out.
+-  **Furan is stateless!** Furan is deployed as an essentially stateless API application, allowing it to be scaled out easily. Furan never shells out to execute docker commands but instead leverages the Docker Engine API.
 
--  **Furan is hookable!** Furan can be triggered on demand or hooked into GitHub events.
+-  **Furan is hookable!** Furan is triggered on demand via GRPC or HTTPS. Builds can be triggered on one node and monitored on any other (allows round-robin load balancing).
 
--  **Furan supports Docker pushs and S3 Deploys!** Furan supports pushing to Docker registries as well as pre-squashing and deploying directly to S3.
+-  **Furan supports Docker pushs and S3 Deploys!** Furan supports pushing to Docker registries (public or private) as well as pre-squashing and deploying tarballs directly to S3.
 
-## Dependencies 
+- **Furan is secure!** Furan integrates with [Vault](https://www.vaultproject.io) for secure storage of service credentials (Docker registries, AWS). Furan supports token and AppID authentication.
 
--  Cassandra 2.x (ScyllaDB 1.x)
--  Kafka 0.9.x
+## Dependencies
+
+-  Cassandra 2.x (ScyllaDB 1.x) (main datastore)
+-  Kafka 0.9.x (for build events)
+-  Vault 0.6.0+ (for secure credential retrieval)
 -  Docker 1.6+
 
-## API 
+## API
 
-The native API for Furan is based on [gRPC](http://www.grpc.io) and supports
+The native API for Furan is based on [GRPC](http://www.grpc.io) and supports
 a number of RPC calls. See the [protobuf definition](https://github.com/dollarshaveclub/furan/blob/master/protos/models.proto#L5-L10)
 for details.
 
 An [HTTPS adapter](https://github.com/dollarshaveclub/furan/blob/master/HTTP-API.md) is
 available for testing convenience.
 
+# Getting Started
+
+
 ## CLI
 
-See the help output for full details:
-
-```bash
-$ go build
-$ ./furan -h
-API application to build Docker images on command
-
-Usage:
-  furan [command]
-
-Available Commands:
-  build       Build and push a docker image from repo
-  server      Run Furan server
-  trigger     Start a build on a remote Furan server
-
-Flags:
-  -z, --consul-db-svc                 Discover Cassandra nodes through Consul
-  -d, --db-dc string                  Comma-delimited list of Cassandra datacenters (if not using Consul discovery) (default "us-west-2")
-  -i, --db-init                       Initialize DB keyspace and tables (only necessary on first run)
-  -b, --db-keyspace string            Cassandra keyspace (default "furan")
-  -n, --db-nodes string               Comma-delimited list of Cassandra nodes (if not using Consul discovery)
-  -l, --db-rf-per-dc uint             Cassandra replication factor per DC (if initializing DB) (default 2)
-  -g, --github-token-path string      Vault path (appended to prefix) for GitHub token (default "/github/token")
-  -f, --kafka-brokers string          Comma-delimited list of Kafka brokers (default "localhost:9092")
-  -j, --kafka-max-open-sends uint     Max number of simultaneous in-flight Kafka message sends (default 100)
-  -m, --kafka-topic string            Kafka topic to publish build events (required for build monitoring) (default "furan-events")
-  -v, --svc-name string               Consul service name for Cassandra (default "cassandra")
-  -a, --vault-addr string             Vault URL (default "https://foobar.com")
-  -p, --vault-app-id string           Vault App-ID
-  -e, --vault-dockercfg-path string   Vault path to .dockercfg contents (default "/dockercfg")
-  -x, --vault-prefix string           Vault path prefix for secrets (default "secret/production/furan")
-  -t, --vault-token string            Vault token (if using token auth) (default "xxxxx")
-  -k, --vault-token-auth              Use Vault token-based auth
-  -u, --vault-user-id-path string     Path to file containing Vault User-ID
-
-Use "furan [command] --help" for more information about a command.
-```
+See the help output for full details: ``furan --help``
