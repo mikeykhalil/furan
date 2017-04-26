@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dollarshaveclub/furan/lib"
 	consul "github.com/hashicorp/consul/api"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
@@ -17,6 +18,7 @@ import (
 
 const (
 	pollStatusIntervalSecs = 5
+	connTimeoutSecs        = 30
 )
 
 var discoverFuranHost bool
@@ -120,7 +122,7 @@ func trigger(cmd *cobra.Command, args []string) {
 	}
 	defer conn.Close()
 
-	c := NewFuranExecutorClient(conn)
+	c := lib.NewFuranExecutorClient(conn)
 
 	log.Printf("triggering build")
 	resp, err := c.StartBuild(context.Background(), &cliBuildRequest)
@@ -128,7 +130,7 @@ func trigger(cmd *cobra.Command, args []string) {
 		rpcerr(err, "StartBuild")
 	}
 
-	mreq := BuildStatusRequest{
+	mreq := lib.BuildStatusRequest{
 		BuildId: resp.BuildId,
 	}
 
@@ -142,7 +144,7 @@ func trigger(cmd *cobra.Command, args []string) {
 	// poll for build status so we know when a build finishes/fails
 	ticker := time.NewTicker(pollStatusIntervalSecs * time.Second)
 	go func() {
-		sreq := BuildStatusRequest{
+		sreq := lib.BuildStatusRequest{
 			BuildId: resp.BuildId,
 		}
 		for {

@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -55,7 +54,7 @@ func handleRPCError(w http.ResponseWriter, err error) {
 }
 
 // REST interface handlers (proxy to gRPC handlers)
-func buildRequestHandler(w http.ResponseWriter, r *http.Request) {
+func BuildRequestHandler(w http.ResponseWriter, r *http.Request) {
 	req, err := unmarshalRequest(r.Body)
 	if err != nil {
 		badRequestError(w, err)
@@ -69,7 +68,7 @@ func buildRequestHandler(w http.ResponseWriter, r *http.Request) {
 	httpSuccess(w, resp)
 }
 
-func buildStatusHandler(w http.ResponseWriter, r *http.Request) {
+func BuildStatusHandler(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	req := BuildStatusRequest{
 		BuildId: id,
@@ -82,7 +81,7 @@ func buildStatusHandler(w http.ResponseWriter, r *http.Request) {
 	httpSuccess(w, resp)
 }
 
-func buildCancelHandler(w http.ResponseWriter, r *http.Request) {
+func BuildCancelHandler(w http.ResponseWriter, r *http.Request) {
 	var req BuildCancelRequest
 	err := jsonpb.Unmarshal(r.Body, &req)
 	if err != nil {
@@ -121,30 +120,10 @@ func httpError(w http.ResponseWriter, code int, err error) {
 	w.Write([]byte(fmt.Sprintf(`{"error_details":"%v"}`, err)))
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
+func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	if cap(grpcSvr.workerChan) > 0 {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusTooManyRequests)
 	}
-}
-
-func versionHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
-	version := struct {
-		Name        string `json:"name"`
-		Version     string `json:"version"`
-		Description string `json:"description"`
-	}{
-		Name:        "furan",
-		Version:     version,
-		Description: description,
-	}
-	vb, err := json.Marshal(version)
-	if err != nil {
-		w.Write([]byte(fmt.Sprintf(`{"error": "error marshalling version: %v"}`, err)))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	w.Write(vb)
 }

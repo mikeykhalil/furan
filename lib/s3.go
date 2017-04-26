@@ -86,7 +86,7 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 	if err != nil {
 		return err
 	}
-	_, err = sm.pushdata(generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA), "application/gzip", in, s3opts, "")
+	_, err = sm.pushdata(GenerateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA), "application/gzip", in, s3opts, "")
 	if err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts in
 	d := s3manager.NewDownloaderWithClient(s3.New(sess), func(d *s3manager.Downloader) {
 		d.Concurrency = int(sm.config.Concurrency)
 	})
-	k := generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
+	k := GenerateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
 	di := &s3.GetObjectInput{
 		Bucket: &s3opts.Bucket,
 		Key:    &k,
@@ -121,7 +121,8 @@ func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts in
 	return nil
 }
 
-func generateS3KeyName(keypfx string, repo string, commitsha string) string {
+// GenerateS3KeyName returns the S3 key name for a given repo & commit SHA
+func GenerateS3KeyName(keypfx string, repo string, commitsha string) string {
 	return fmt.Sprintf("%v%v/%v.tar.gz", keypfx, repo, commitsha)
 }
 
@@ -134,7 +135,7 @@ func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64
 	sess := sm.getSession(s3opts.Region)
 	c := s3.New(sess)
 
-	kn := generateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
+	kn := GenerateS3KeyName(s3opts.KeyPrefix, desc.GitHubRepo, desc.CommitSHA)
 	in := &s3.ListObjectsV2Input{
 		Bucket:  &s3opts.Bucket,
 		MaxKeys: aws.Int64(1),

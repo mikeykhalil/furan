@@ -89,8 +89,8 @@ func build(cmd *cobra.Command, args []string) {
 	}()
 
 	validateCLIBuildRequest()
-	lib.setupVault()
-	lib.setupDB(initializeDB)
+	lib.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+	setupDB(initializeDB)
 
 	dnull, err := os.Open(os.DevNull)
 	if err != nil {
@@ -105,34 +105,34 @@ func build(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("error creating Datadog collector: %v", err)
 	}
-	lib.setupKafka(mc)
+	setupKafka(mc)
 	err = getDockercfg()
 	if err != nil {
 		clierr("Error getting dockercfg: %v", err)
 	}
 
-	gf := lib.NewGitHubFetcher(gitConfig.token)
+	gf := lib.NewGitHubFetcher(gitConfig.Token)
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		clierr("error creating Docker client: %v", err)
 	}
 
-	osm := NewS3StorageManager(awsConfig, mc, clogger)
-	is := NewDockerImageSquasher(clogger)
-	s3errcfg := S3ErrorLogConfig{
+	osm := lib.NewS3StorageManager(awsConfig, mc, clogger)
+	is := lib.NewDockerImageSquasher(clogger)
+	s3errcfg := lib.S3ErrorLogConfig{
 		PushToS3:          buildS3ErrorLogs,
 		Region:            buildS3ErrorLogRegion,
 		Bucket:            buildS3ErrorLogBucket,
 		PresignTTLMinutes: buildS3ErrorLogsPresignTTL,
 	}
-	ib, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
+	ib, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, dockerConfig.DockercfgContents, s3errcfg, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}
 
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	gs := NewGRPCServer(ib, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, mc, 1, 1, logger)
+	gs := lib.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, 1, 1, logger)
 
 	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
 	if err != nil {
@@ -141,11 +141,11 @@ func build(cmd *cobra.Command, args []string) {
 
 	fmt.Fprintf(os.Stdout, "build id: %v\n", resp.BuildId)
 
-	req := &BuildStatusRequest{
+	req := &lib.BuildStatusRequest{
 		BuildId: resp.BuildId,
 	}
 
-	ls := NewLocalServerStream(ctx, os.Stdout)
+	ls := lib.NewLocalServerStream(ctx, os.Stdout)
 	err = gs.MonitorBuild(req, ls)
 	if err != nil {
 		clierr("error monitoring build: %v", err)

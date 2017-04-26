@@ -12,6 +12,7 @@ import (
 	"github.com/dollarshaveclub/furan/lib"
 	"github.com/dollarshaveclub/go-lib/cassandra"
 	"github.com/gocql/gocql"
+	consul "github.com/hashicorp/consul/api"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +21,7 @@ var gitConfig lib.Gitconfig
 var dockerConfig lib.Dockerconfig
 var awsConfig lib.AWSConfig
 var dbConfig lib.DBconfig
+var kafkaConfig lib.Kafkaconfig
 
 var nodestr string
 var datacenterstr string
@@ -28,12 +30,14 @@ var kafkaBrokerStr string
 var awscredsprefix string
 var dogstatsdAddr string
 
+var logger *log.Logger
+
 // used by build and trigger commands
-var cliBuildRequest = BuildRequest{
-	Build: &BuildDefinition{},
-	Push: &PushDefinition{
-		Registry: &PushRegistryDefinition{},
-		S3:       &PushS3Definition{},
+var cliBuildRequest = lib.BuildRequest{
+	Build: &lib.BuildDefinition{},
+	Push: &lib.PushDefinition{
+		Registry: &lib.PushRegistryDefinition{},
+		S3:       &lib.PushS3Definition{},
 	},
 }
 var tags string
@@ -55,24 +59,24 @@ func Execute() {
 
 // shorthands in use: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 't', 'u', 'v', 'x', 'z']
 func init() {
-	RootCmd.PersistentFlags().StringVarP(&vaultConfig.addr, "vault-addr", "a", "https://vault-prod.shave.io:8200", "Vault URL")
-	RootCmd.PersistentFlags().StringVarP(&vaultConfig.token, "vault-token", "t", os.Getenv("VAULT_TOKEN"), "Vault token (if using token auth)")
-	RootCmd.PersistentFlags().BoolVarP(&vaultConfig.tokenAuth, "vault-token-auth", "k", false, "Use Vault token-based auth")
-	RootCmd.PersistentFlags().StringVarP(&vaultConfig.appID, "vault-app-id", "p", os.Getenv("APP_ID"), "Vault App-ID")
-	RootCmd.PersistentFlags().StringVarP(&vaultConfig.userIDPath, "vault-user-id-path", "u", os.Getenv("USER_ID_PATH"), "Path to file containing Vault User-ID")
-	RootCmd.PersistentFlags().BoolVarP(&dbConfig.useConsul, "consul-db-svc", "z", false, "Discover Cassandra nodes through Consul")
-	RootCmd.PersistentFlags().StringVarP(&dbConfig.consulServiceName, "svc-name", "v", "cassandra", "Consul service name for Cassandra")
+	RootCmd.PersistentFlags().StringVarP(&vaultConfig.Addr, "vault-addr", "a", "https://vault-prod.shave.io:8200", "Vault URL")
+	RootCmd.PersistentFlags().StringVarP(&vaultConfig.Token, "vault-token", "t", os.Getenv("VAULT_TOKEN"), "Vault token (if using token auth)")
+	RootCmd.PersistentFlags().BoolVarP(&vaultConfig.TokenAuth, "vault-token-auth", "k", false, "Use Vault token-based auth")
+	RootCmd.PersistentFlags().StringVarP(&vaultConfig.AppID, "vault-app-id", "p", os.Getenv("APP_ID"), "Vault App-ID")
+	RootCmd.PersistentFlags().StringVarP(&vaultConfig.UserIDPath, "vault-user-id-path", "u", os.Getenv("USER_ID_PATH"), "Path to file containing Vault User-ID")
+	RootCmd.PersistentFlags().BoolVarP(&dbConfig.UseConsul, "consul-db-svc", "z", false, "Discover Cassandra nodes through Consul")
+	RootCmd.PersistentFlags().StringVarP(&dbConfig.ConsulServiceName, "svc-name", "v", "cassandra", "Consul service name for Cassandra")
 	RootCmd.PersistentFlags().StringVarP(&nodestr, "db-nodes", "n", "", "Comma-delimited list of Cassandra nodes (if not using Consul discovery)")
 	RootCmd.PersistentFlags().StringVarP(&datacenterstr, "db-dc", "d", "us-west-2", "Comma-delimited list of Cassandra datacenters (if not using Consul discovery)")
 	RootCmd.PersistentFlags().BoolVarP(&initializeDB, "db-init", "i", false, "Initialize DB keyspace and tables (only necessary on first run)")
-	RootCmd.PersistentFlags().StringVarP(&dbConfig.keyspace, "db-keyspace", "b", "furan", "Cassandra keyspace")
-	RootCmd.PersistentFlags().UintVarP(&dbConfig.rfPerDC, "db-rf-per-dc", "l", 2, "Cassandra replication factor per DC (if initializing DB)")
-	RootCmd.PersistentFlags().StringVarP(&vaultConfig.vaultPathPrefix, "vault-prefix", "x", "secret/production/furan", "Vault path prefix for secrets")
-	RootCmd.PersistentFlags().StringVarP(&gitConfig.tokenVaultPath, "github-token-path", "g", "/github/token", "Vault path (appended to prefix) for GitHub token")
-	RootCmd.PersistentFlags().StringVarP(&dockerConfig.dockercfgVaultPath, "vault-dockercfg-path", "e", "/dockercfg", "Vault path to .dockercfg contents")
+	RootCmd.PersistentFlags().StringVarP(&dbConfig.Keyspace, "db-keyspace", "b", "furan", "Cassandra keyspace")
+	RootCmd.PersistentFlags().UintVarP(&dbConfig.RFPerDC, "db-rf-per-dc", "l", 2, "Cassandra replication factor per DC (if initializing DB)")
+	RootCmd.PersistentFlags().StringVarP(&vaultConfig.VaultPathPrefix, "vault-prefix", "x", "secret/production/furan", "Vault path prefix for secrets")
+	RootCmd.PersistentFlags().StringVarP(&gitConfig.TokenVaultPath, "github-token-path", "g", "/github/token", "Vault path (appended to prefix) for GitHub token")
+	RootCmd.PersistentFlags().StringVarP(&dockerConfig.DockercfgVaultPath, "vault-dockercfg-path", "e", "/dockercfg", "Vault path to .dockercfg contents")
 	RootCmd.PersistentFlags().StringVarP(&kafkaBrokerStr, "kafka-brokers", "f", "localhost:9092", "Comma-delimited list of Kafka brokers")
-	RootCmd.PersistentFlags().StringVarP(&kafkaConfig.topic, "kafka-topic", "m", "furan-events", "Kafka topic to publish build events (required for build monitoring)")
-	RootCmd.PersistentFlags().UintVarP(&kafkaConfig.maxOpenSends, "kafka-max-open-sends", "j", 1000, "Max number of simultaneous in-flight Kafka message sends")
+	RootCmd.PersistentFlags().StringVarP(&kafkaConfig.Topic, "kafka-topic", "m", "furan-events", "Kafka topic to publish build events (required for build monitoring)")
+	RootCmd.PersistentFlags().UintVarP(&kafkaConfig.MaxOpenSends, "kafka-max-open-sends", "j", 1000, "Max number of simultaneous in-flight Kafka message sends")
 	RootCmd.PersistentFlags().StringVarP(&awscredsprefix, "aws-creds-vault-prefix", "c", "/aws", "Vault path prefix for AWS credentials (paths: {vault prefix}/{aws creds prefix}/access_key_id|secret_access_key)")
 	RootCmd.PersistentFlags().UintVarP(&awsConfig.Concurrency, "s3-concurrency", "o", 10, "Number of concurrent upload/download threads for S3 transfers")
 	RootCmd.PersistentFlags().StringVarP(&dogstatsdAddr, "dogstatsd-addr", "q", "127.0.0.1:8125", "Address of dogstatsd for metrics")
@@ -84,11 +88,11 @@ func clierr(msg string, params ...interface{}) {
 }
 
 func getDockercfg() error {
-	err := json.Unmarshal([]byte(dockerConfig.dockercfgRaw), &dockerConfig.dockercfgContents)
+	err := json.Unmarshal([]byte(dockerConfig.DockercfgRaw), &dockerConfig.DockercfgContents)
 	if err != nil {
 		return err
 	}
-	for k, v := range dockerConfig.dockercfgContents {
+	for k, v := range dockerConfig.DockercfgContents {
 		if v.Auth != "" && v.Username == "" && v.Password == "" {
 			// Auth is a base64-encoded string of the form USERNAME:PASSWORD
 			ab, err := base64.StdEncoding.DecodeString(v.Auth)
@@ -104,7 +108,7 @@ func getDockercfg() error {
 			v.Auth = ""
 		}
 		v.ServerAddress = k
-		dockerConfig.dockercfgContents[k] = v
+		dockerConfig.DockercfgContents[k] = v
 	}
 	return nil
 }
@@ -132,73 +136,73 @@ func getNodesFromConsul(svc string) ([]string, error) {
 }
 
 func connectToDB() {
-	if dbConfig.useConsul {
-		nodes, err := getNodesFromConsul(dbConfig.consulServiceName)
+	if dbConfig.UseConsul {
+		nodes, err := getNodesFromConsul(dbConfig.ConsulServiceName)
 		if err != nil {
 			log.Fatalf("error getting DB nodes: %v", err)
 		}
-		dbConfig.nodes = nodes
+		dbConfig.Nodes = nodes
 	}
-	dbConfig.cluster = gocql.NewCluster(dbConfig.nodes...)
-	dbConfig.cluster.ProtoVersion = 3
-	dbConfig.cluster.NumConns = 20
-	dbConfig.cluster.SocketKeepalive = 30 * time.Second
+	dbConfig.Cluster = gocql.NewCluster(dbConfig.Nodes...)
+	dbConfig.Cluster.ProtoVersion = 3
+	dbConfig.Cluster.NumConns = 20
+	dbConfig.Cluster.SocketKeepalive = 30 * time.Second
 }
 
 func setupDataLayer() {
-	s, err := dbConfig.cluster.CreateSession()
+	s, err := dbConfig.Cluster.CreateSession()
 	if err != nil {
 		log.Fatalf("error creating DB session: %v", err)
 	}
-	dbConfig.datalayer = NewDBLayer(s)
+	dbConfig.Datalayer = lib.NewDBLayer(s)
 }
 
 func initDB() {
 	rfmap := map[string]uint{}
-	for _, dc := range dbConfig.dataCenters {
-		rfmap[dc] = dbConfig.rfPerDC
+	for _, dc := range dbConfig.DataCenters {
+		rfmap[dc] = dbConfig.RFPerDC
 	}
-	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.cluster, dbConfig.keyspace, rfmap)
+	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.Cluster, dbConfig.Keyspace, rfmap)
 	if err != nil {
 		log.Fatalf("error creating keyspace: %v", err)
 	}
-	err = cassandra.CreateRequiredTypes(dbConfig.cluster, requiredUDTs)
+	err = cassandra.CreateRequiredTypes(dbConfig.Cluster, lib.RequiredUDTs)
 	if err != nil {
 		log.Fatalf("error creating UDTs: %v", err)
 	}
-	err = cassandra.CreateRequiredTables(dbConfig.cluster, requiredTables)
+	err = cassandra.CreateRequiredTables(dbConfig.Cluster, lib.RequiredTables)
 	if err != nil {
 		log.Fatalf("error creating tables: %v", err)
 	}
 }
 
 func setupDB(initdb bool) {
-	dbConfig.nodes = strings.Split(nodestr, ",")
-	if !dbConfig.useConsul {
-		if len(dbConfig.nodes) == 0 || dbConfig.nodes[0] == "" {
+	dbConfig.Nodes = strings.Split(nodestr, ",")
+	if !dbConfig.UseConsul {
+		if len(dbConfig.Nodes) == 0 || dbConfig.Nodes[0] == "" {
 			log.Fatalf("cannot setup DB: Consul is disabled and node list is empty")
 		}
 	}
-	dbConfig.dataCenters = strings.Split(datacenterstr, ",")
+	dbConfig.DataCenters = strings.Split(datacenterstr, ",")
 	connectToDB()
 	if initdb {
 		initDB()
 	}
-	dbConfig.cluster.Keyspace = dbConfig.keyspace
+	dbConfig.Cluster.Keyspace = dbConfig.Keyspace
 	setupDataLayer()
 }
 
-func setupKafka(mc MetricsCollector) {
-	kafkaConfig.brokers = strings.Split(kafkaBrokerStr, ",")
-	if len(kafkaConfig.brokers) < 1 {
+func setupKafka(mc lib.MetricsCollector) {
+	kafkaConfig.Brokers = strings.Split(kafkaBrokerStr, ",")
+	if len(kafkaConfig.Brokers) < 1 {
 		log.Fatalf("At least one Kafka broker is required")
 	}
-	if kafkaConfig.topic == "" {
+	if kafkaConfig.Topic == "" {
 		log.Fatalf("Kafka topic is required")
 	}
-	kp, err := NewKafkaManager(kafkaConfig.brokers, kafkaConfig.topic, kafkaConfig.maxOpenSends, mc, logger)
+	kp, err := lib.NewKafkaManager(kafkaConfig.Brokers, kafkaConfig.Topic, kafkaConfig.MaxOpenSends, mc, logger)
 	if err != nil {
 		log.Fatalf("Error creating Kafka producer: %v", err)
 	}
-	kafkaConfig.manager = kp
+	kafkaConfig.Manager = kp
 }

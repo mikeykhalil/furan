@@ -65,7 +65,7 @@ func buildStateFromString(state string) BuildStatusResponse_BuildState {
 	return BuildStatusResponse_BUILDING //unreachable
 }
 
-var requiredUDTs = []cassandra.UDT{
+var RequiredUDTs = []cassandra.UDT{
 	cassandra.UDT{
 		Name: "build_request",
 		Columns: []string{
@@ -81,7 +81,7 @@ var requiredUDTs = []cassandra.UDT{
 		},
 	},
 }
-var requiredTables = []cassandra.CTable{
+var RequiredTables = []cassandra.CTable{
 	cassandra.CTable{
 		Name: "builds_by_id",
 		Columns: []string{
