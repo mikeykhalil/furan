@@ -1,6 +1,6 @@
 #!/bin/sh
 
-protoc -I ./protos ./protos/models.proto --go_out=plugins=grpc:cmd
+protoc -I ./protos ./protos/models.proto --go_out=plugins=grpc:lib
 protoc -I ./protos ./protos/models.proto --go_out=plugins=grpc:rpcclient
 if [[ $(uname) == "Darwin" ]]; then
   SED="gsed"
