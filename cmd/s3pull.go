@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	docker "github.com/docker/engine-api/client"
+	"github.com/dollarshaveclub/furan/lib"
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
@@ -47,8 +48,8 @@ DOCKER_CERT_PATH`,
 		if s3PullOpts.commitsha == "" {
 			clierr("Commit SHA is required")
 		}
-		setupVault()
-		getAWSCreds(awscredsprefix)
+		lib.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+		lib.GetAWSCreds(&vaultConfig, awscredsprefix)
 	},
 	Run: s3pull,
 }
@@ -64,25 +65,25 @@ func init() {
 }
 
 func s3pull(cmd *cobra.Command, args []string) {
-	logger := log.New(os.Stderr, "", log.LstdFlags)
-	mc, err := NewDatadogCollector(dogstatsdAddr)
+	logger = log.New(os.Stderr, "", log.LstdFlags)
+	mc, err := lib.NewDatadogCollector(dogstatsdAddr)
 	if err != nil {
 		clierr("error creating Datadog collector: %v", err)
 	}
-	osm := NewS3StorageManager(awsConfig, mc, logger)
+	osm := lib.NewS3StorageManager(awsConfig, mc, logger)
 
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		clierr("error creating Docker client: %v", err)
 	}
 
-	opts := &S3Options{
+	opts := &lib.S3Options{
 		Region:    s3PullOpts.region,
 		Bucket:    s3PullOpts.bucket,
 		KeyPrefix: s3PullOpts.keyprefix,
 	}
 
-	desc := ImageDescription{
+	desc := lib.ImageDescription{
 		GitHubRepo: s3PullOpts.githubRepo,
 		CommitSHA:  s3PullOpts.commitsha,
 	}
@@ -102,7 +103,7 @@ func s3pull(cmd *cobra.Command, args []string) {
 	bb := make([]byte, sz)
 	buf := aws.NewWriteAtBuffer(bb)
 
-	logger.Printf("downloading %v s3://%v/%v (%v threads)", s3PullOpts.region, s3PullOpts.bucket, generateS3KeyName(s3PullOpts.keyprefix, s3PullOpts.githubRepo, s3PullOpts.commitsha), awsConfig.Concurrency)
+	logger.Printf("downloading %v s3://%v/%v (%v threads)", s3PullOpts.region, s3PullOpts.bucket, lib.GenerateS3KeyName(s3PullOpts.keyprefix, s3PullOpts.githubRepo, s3PullOpts.commitsha), awsConfig.Concurrency)
 
 	err = osm.Pull(desc, buf, opts)
 	if err != nil {

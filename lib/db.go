@@ -1,27 +1,10 @@
-package cmd
+package lib
 
 import (
 	"log"
-	"strings"
-	"time"
 
 	"github.com/dollarshaveclub/go-lib/cassandra"
-	"github.com/gocql/gocql"
-	consul "github.com/hashicorp/consul/api"
 )
-
-type dbconfig struct {
-	nodes             []string
-	useConsul         bool
-	consulServiceName string
-	dataCenters       []string
-	cluster           *gocql.ClusterConfig
-	datalayer         DataLayer
-	keyspace          string
-	rfPerDC           uint
-}
-
-var dbConfig dbconfig
 
 // we need a separate explicit type for UDT that contains "cql:" tags
 // (protobuf definitions can't have custom tags)
@@ -82,7 +65,7 @@ func buildStateFromString(state string) BuildStatusResponse_BuildState {
 	return BuildStatusResponse_BUILDING //unreachable
 }
 
-var requiredUDTs = []cassandra.UDT{
+var RequiredUDTs = []cassandra.UDT{
 	cassandra.UDT{
 		Name: "build_request",
 		Columns: []string{
@@ -98,7 +81,7 @@ var requiredUDTs = []cassandra.UDT{
 		},
 	},
 }
-var requiredTables = []cassandra.CTable{
+var RequiredTables = []cassandra.CTable{
 	cassandra.CTable{
 		Name: "builds_by_id",
 		Columns: []string{
@@ -140,83 +123,4 @@ var requiredTables = []cassandra.CTable{
 			"push_output list<blob>",
 		},
 	},
-}
-
-// GetNodesFromConsul queries the local Consul agent for the given service,
-// returning the healthy nodes in ascending order of network distance/latency
-func getNodesFromConsul(svc string) ([]string, error) {
-	nodes := []string{}
-	c, err := consul.NewClient(consul.DefaultConfig())
-	if err != nil {
-		return nodes, err
-	}
-	h := c.Health()
-	opts := &consul.QueryOptions{
-		Near: "_agent",
-	}
-	se, _, err := h.Service(svc, "", true, opts)
-	if err != nil {
-		return nodes, err
-	}
-	for _, s := range se {
-		nodes = append(nodes, s.Node.Address)
-	}
-	return nodes, nil
-}
-
-func connectToDB() {
-	if dbConfig.useConsul {
-		nodes, err := getNodesFromConsul(dbConfig.consulServiceName)
-		if err != nil {
-			log.Fatalf("error getting DB nodes: %v", err)
-		}
-		dbConfig.nodes = nodes
-	}
-	dbConfig.cluster = gocql.NewCluster(dbConfig.nodes...)
-	dbConfig.cluster.ProtoVersion = 3
-	dbConfig.cluster.NumConns = 20
-	dbConfig.cluster.SocketKeepalive = 30 * time.Second
-}
-
-func setupDataLayer() {
-	s, err := dbConfig.cluster.CreateSession()
-	if err != nil {
-		log.Fatalf("error creating DB session: %v", err)
-	}
-	dbConfig.datalayer = NewDBLayer(s)
-}
-
-func initDB() {
-	rfmap := map[string]uint{}
-	for _, dc := range dbConfig.dataCenters {
-		rfmap[dc] = dbConfig.rfPerDC
-	}
-	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.cluster, dbConfig.keyspace, rfmap)
-	if err != nil {
-		log.Fatalf("error creating keyspace: %v", err)
-	}
-	err = cassandra.CreateRequiredTypes(dbConfig.cluster, requiredUDTs)
-	if err != nil {
-		log.Fatalf("error creating UDTs: %v", err)
-	}
-	err = cassandra.CreateRequiredTables(dbConfig.cluster, requiredTables)
-	if err != nil {
-		log.Fatalf("error creating tables: %v", err)
-	}
-}
-
-func setupDB(initdb bool) {
-	dbConfig.nodes = strings.Split(nodestr, ",")
-	if !dbConfig.useConsul {
-		if len(dbConfig.nodes) == 0 || dbConfig.nodes[0] == "" {
-			log.Fatalf("cannot setup DB: Consul is disabled and node list is empty")
-		}
-	}
-	dbConfig.dataCenters = strings.Split(datacenterstr, ",")
-	connectToDB()
-	if initdb {
-		initDB()
-	}
-	dbConfig.cluster.Keyspace = dbConfig.keyspace
-	setupDataLayer()
 }

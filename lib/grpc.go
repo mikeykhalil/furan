@@ -1,4 +1,4 @@
-package cmd
+package lib
 
 import (
 	"fmt"
@@ -33,6 +33,15 @@ var grpcSvr *GrpcServer
 type workerRequest struct {
 	ctx context.Context
 	req *BuildRequest
+}
+
+func isCancelled(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
 }
 
 type ctxKeyType string
@@ -92,7 +101,7 @@ func (gr *GrpcServer) runWorkers() {
 	for i := 0; uint(i) < gr.wcnt; i++ {
 		go gr.buildWorker()
 	}
-	gr.logf("%v workers running (queue: %v)", serverConfig.concurrency, serverConfig.queuesize)
+	gr.logf("%v workers running (queue: %v)", gr.wcnt, gr.qsize)
 }
 
 func (gr *GrpcServer) buildWorker() {

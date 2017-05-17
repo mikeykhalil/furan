@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,51 +10,23 @@ import (
 	"time"
 
 	docker "github.com/docker/engine-api/client"
+	"github.com/dollarshaveclub/furan/lib"
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 )
 
-type serverconfig struct {
-	httpsPort           uint
-	grpcPort            uint
-	httpsAddr           string
-	grpcAddr            string
-	concurrency         uint
-	queuesize           uint
-	vaultTLSCertPath    string
-	vaultTLSKeyPath     string
-	tlsCert             []byte
-	tlsKey              []byte
-	logToSumo           bool
-	sumoURL             string
-	vaultSumoURLPath    string
-	healthcheckHTTPport uint
-	s3ErrorLogs         bool
-	s3ErrorLogBucket    string
-	s3ErrorLogRegion    string
-	s3PresignTTL        uint
-	gcIntervalSecs      uint
-	dockerDiskPath      string
-}
-
-var serverConfig serverconfig
-var kafkaConfig kafkaconfig
-
-var logger *log.Logger
-
-var version = "0"
-var description = "unknown"
+var serverConfig lib.Serverconfig
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run Furan server",
 	Long:  `Furan API server (see docs)`,
 	PreRun: func(cmd *cobra.Command, args []string) {
-		if serverConfig.s3ErrorLogs {
-			if serverConfig.s3ErrorLogBucket == "" {
+		if serverConfig.S3ErrorLogs {
+			if serverConfig.S3ErrorLogBucket == "" {
 				clierr("S3 error log bucket must be defined")
 			}
-			if serverConfig.s3ErrorLogRegion == "" {
+			if serverConfig.S3ErrorLogRegion == "" {
 				clierr("S3 error log region must be defined")
 			}
 		}
@@ -62,36 +35,36 @@ var serverCmd = &cobra.Command{
 }
 
 func init() {
-	serverCmd.PersistentFlags().UintVar(&serverConfig.httpsPort, "https-port", 4000, "REST HTTPS TCP port")
-	serverCmd.PersistentFlags().UintVar(&serverConfig.grpcPort, "grpc-port", 4001, "gRPC TCP port")
-	serverCmd.PersistentFlags().UintVar(&serverConfig.healthcheckHTTPport, "healthcheck-port", 4002, "Healthcheck HTTP port (listens on localhost only)")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.httpsAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.grpcAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
-	serverCmd.PersistentFlags().UintVar(&serverConfig.concurrency, "concurrency", 10, "Max concurrent builds")
-	serverCmd.PersistentFlags().UintVar(&serverConfig.queuesize, "queue", 100, "Max queue size for buffered build requests")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSCertPath, "tls-cert-path", "/tls/cert", "Vault path to TLS certificate")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
-	serverCmd.PersistentFlags().BoolVar(&serverConfig.logToSumo, "log-to-sumo", true, "Send log entries to SumoLogic HTTPS collector")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.vaultSumoURLPath, "sumo-collector-path", "/sumologic/url", "Vault path SumoLogic collector URL")
-	serverCmd.PersistentFlags().BoolVar(&serverConfig.s3ErrorLogs, "s3-error-logs", false, "Upload failed build logs to S3 (region and bucket must be specified)")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.s3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.s3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
-	serverCmd.PersistentFlags().UintVar(&serverConfig.s3PresignTTL, "s3-error-log-presign-ttl", 60*24, "Presigned error log URL TTL in minutes (0 to disable)")
-	serverCmd.PersistentFlags().UintVar(&serverConfig.gcIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.dockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.HTTPSPort, "https-port", 4000, "REST HTTPS TCP port")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.GRPCPort, "grpc-port", 4001, "gRPC TCP port")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.HealthcheckHTTPport, "healthcheck-port", 4002, "Healthcheck HTTP port (listens on localhost only)")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.HTTPSAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.GRPCAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.Concurrency, "concurrency", 10, "Max concurrent builds")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.Queuesize, "queue", 100, "Max queue size for buffered build requests")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.VaultTLSCertPath, "tls-cert-path", "/tls/cert", "Vault path to TLS certificate")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.VaultTLSKeyPath, "tls-key-path", "/tls/key", "Vault path to TLS private key")
+	serverCmd.PersistentFlags().BoolVar(&serverConfig.LogToSumo, "log-to-sumo", true, "Send log entries to SumoLogic HTTPS collector")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.VaultSumoURLPath, "sumo-collector-path", "/sumologic/url", "Vault path SumoLogic collector URL")
+	serverCmd.PersistentFlags().BoolVar(&serverConfig.S3ErrorLogs, "s3-error-logs", false, "Upload failed build logs to S3 (region and bucket must be specified)")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.S3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.S3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.S3PresignTTL, "s3-error-log-presign-ttl", 60*24, "Presigned error log URL TTL in minutes (0 to disable)")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.GCIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.DockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
 	RootCmd.AddCommand(serverCmd)
 }
 
 func setupServerLogger() {
 	var url string
-	if serverConfig.logToSumo {
-		url = serverConfig.sumoURL
+	if serverConfig.LogToSumo {
+		url = serverConfig.SumoURL
 	}
 	hn, err := os.Hostname()
 	if err != nil {
 		log.Fatalf("error getting hostname: %v", err)
 	}
-	stdlog := NewStandardLogger(os.Stderr, url)
+	stdlog := lib.NewStandardLogger(os.Stderr, url)
 	logger = log.New(stdlog, fmt.Sprintf("%v: ", hn), log.LstdFlags)
 }
 
@@ -99,33 +72,33 @@ func setupServerLogger() {
 // (simplifies Consul health check)
 func healthcheck() {
 	r := mux.NewRouter()
-	r.HandleFunc("/health", healthHandler).Methods("GET")
-	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.healthcheckHTTPport)
+	r.HandleFunc("/health", lib.HealthHandler).Methods("GET")
+	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.HealthcheckHTTPport)
 	server := &http.Server{Addr: addr, Handler: r}
 	logger.Printf("HTTP healthcheck listening on: %v", addr)
 	logger.Println(server.ListenAndServe())
 }
 
-func startgRPC(mc MetricsCollector, dc ImageBuildClient) {
-	gf := NewGitHubFetcher(gitConfig.token)
-	osm := NewS3StorageManager(awsConfig, mc, logger)
-	is := NewDockerImageSquasher(logger)
-	s3errcfg := S3ErrorLogConfig{
-		PushToS3:          serverConfig.s3ErrorLogs,
-		Region:            serverConfig.s3ErrorLogRegion,
-		Bucket:            serverConfig.s3ErrorLogBucket,
-		PresignTTLMinutes: serverConfig.s3PresignTTL,
+func startgRPC(mc lib.MetricsCollector, dc lib.ImageBuildClient) {
+	gf := lib.NewGitHubFetcher(gitConfig.Token)
+	osm := lib.NewS3StorageManager(awsConfig, mc, logger)
+	is := lib.NewDockerImageSquasher(logger)
+	s3errcfg := lib.S3ErrorLogConfig{
+		PushToS3:          serverConfig.S3ErrorLogs,
+		Region:            serverConfig.S3ErrorLogRegion,
+		Bucket:            serverConfig.S3ErrorLogBucket,
+		PresignTTLMinutes: serverConfig.S3PresignTTL,
 	}
-	imageBuilder, err := NewImageBuilder(kafkaConfig.manager, dbConfig.datalayer, gf, dc, mc, osm, is, dockerConfig.dockercfgContents, s3errcfg, logger)
+	imageBuilder, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, dockerConfig.DockercfgContents, s3errcfg, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}
-	grpcSvr = NewGRPCServer(imageBuilder, dbConfig.datalayer, kafkaConfig.manager, kafkaConfig.manager, mc, serverConfig.queuesize, serverConfig.concurrency, logger)
-	go grpcSvr.ListenRPC(serverConfig.grpcAddr, serverConfig.grpcPort)
+	grpcSvr := lib.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, serverConfig.Queuesize, serverConfig.Concurrency, logger)
+	go grpcSvr.ListenRPC(serverConfig.GRPCAddr, serverConfig.GRPCPort)
 }
 
-func startGC(dc ImageBuildClient, mc MetricsCollector, log *log.Logger, interval uint) {
-	igc := NewDockerImageGC(log, dc, mc, serverConfig.dockerDiskPath)
+func startGC(dc lib.ImageBuildClient, mc lib.MetricsCollector, log *log.Logger, interval uint) {
+	igc := lib.NewDockerImageGC(log, dc, mc, serverConfig.DockerDiskPath)
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	go func() {
 		for {
@@ -138,19 +111,19 @@ func startGC(dc ImageBuildClient, mc MetricsCollector, log *log.Logger, interval
 }
 
 func server(cmd *cobra.Command, args []string) {
-	setupVault()
-	if serverConfig.logToSumo {
-		getSumoURL()
+	lib.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+	if serverConfig.LogToSumo {
+		lib.GetSumoURL(&vaultConfig, &serverConfig)
 	}
 	setupServerLogger()
 	setupDB(initializeDB)
-	mc, err := NewDatadogCollector(dogstatsdAddr)
+	mc, err := lib.NewDatadogCollector(dogstatsdAddr)
 	if err != nil {
 		log.Fatalf("error creating Datadog collector: %v", err)
 	}
 	setupKafka(mc)
-	certPath, keyPath := writeTLSCert()
-	defer rmTempFiles(certPath, keyPath)
+	certPath, keyPath := lib.WriteTLSCert(&vaultConfig, &serverConfig)
+	defer lib.RmTempFiles(certPath, keyPath)
 	err = getDockercfg()
 	if err != nil {
 		logger.Fatalf("error reading dockercfg: %v", err)
@@ -162,21 +135,23 @@ func server(cmd *cobra.Command, args []string) {
 	}
 
 	startgRPC(mc, dc)
-	startGC(dc, mc, logger, serverConfig.gcIntervalSecs)
+	startGC(dc, mc, logger, serverConfig.GCIntervalSecs)
 	go healthcheck()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
-	r.HandleFunc("/build", buildRequestHandler).Methods("POST")
-	r.HandleFunc("/build/{id}", buildStatusHandler).Methods("GET")
-	r.HandleFunc("/build/{id}", buildCancelHandler).Methods("DELETE")
+	r.HandleFunc("/build", lib.BuildRequestHandler).Methods("POST")
+	r.HandleFunc("/build/{id}", lib.BuildStatusHandler).Methods("GET")
+	r.HandleFunc("/build/{id}", lib.BuildCancelHandler).Methods("DELETE")
 
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	addr := fmt.Sprintf("%v:%v", serverConfig.httpsAddr, serverConfig.httpsPort)
+	addr := fmt.Sprintf("%v:%v", serverConfig.HTTPSAddr, serverConfig.HTTPSPort)
 	server := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsconfig}
 	logger.Printf("HTTPS REST listening on: %v", addr)
 	logger.Println(server.ListenAndServeTLS(certPath, keyPath))
 }
+
+var version, description string
 
 func setupVersion() {
 	bv := make([]byte, 20)
@@ -201,4 +176,24 @@ func setupVersion() {
 	}
 	version = string(bv[:sv])
 	description = string(bd[:sd])
+}
+
+func versionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "application/json")
+	version := struct {
+		Name        string `json:"name"`
+		Version     string `json:"version"`
+		Description string `json:"description"`
+	}{
+		Name:        "furan",
+		Version:     version,
+		Description: description,
+	}
+	vb, err := json.Marshal(version)
+	if err != nil {
+		w.Write([]byte(fmt.Sprintf(`{"error": "error marshalling version: %v"}`, err)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Write(vb)
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/dollarshaveclub/furan/lib"
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
@@ -68,7 +69,7 @@ func squash(cmd *cobra.Command, args []string) {
 		sink = dnull
 	}
 	logger = log.New(sink, "", log.LstdFlags)
-	squasher := NewDockerImageSquasher(logger)
+	squasher := lib.NewDockerImageSquasher(logger)
 
 	si, err := squasher.Squash(context.Background(), input, output)
 	if err != nil {
