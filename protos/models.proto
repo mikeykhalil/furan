@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package cmd;
+package lib;
 
 service FuranExecutor {
   rpc StartBuild (BuildRequest) returns (BuildRequestResponse) {}

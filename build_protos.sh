@@ -7,4 +7,4 @@ if [[ $(uname) == "Darwin" ]]; then
 else
   SED="sed"
 fi
-$SED -i 's/package cmd/package rpcclient/g' ./rpcclient/models.pb.go
+$SED -i 's/package lib/package rpcclient/g' ./rpcclient/models.pb.go
