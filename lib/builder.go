@@ -319,6 +319,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 		PullParent:  true,
 		Dockerfile:  rbi.DockerfilePath,
 		AuthConfigs: ib.dockercfg,
+		NoCache:     true,
 	}
 	ibr, err := ib.c.ImageBuild(ctx, rbi.Context, opts)
 	if err != nil {
