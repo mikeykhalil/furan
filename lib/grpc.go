@@ -28,8 +28,6 @@ type GrpcServer struct {
 	wcnt       uint
 }
 
-var grpcSvr *GrpcServer
-
 type workerRequest struct {
 	ctx context.Context
 	req *BuildRequest
@@ -131,7 +129,7 @@ func (gr *GrpcServer) ListenRPC(addr string, port uint) error {
 		return err
 	}
 	s := grpc.NewServer()
-	RegisterFuranExecutorServer(s, grpcSvr)
+	RegisterFuranExecutorServer(s, gr)
 	gr.logf("gRPC listening on: %v", addr)
 	return s.Serve(l)
 }

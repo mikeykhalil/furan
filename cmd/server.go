@@ -70,31 +70,13 @@ func setupServerLogger() {
 
 // Separate server because it's HTTP on localhost only
 // (simplifies Consul health check)
-func healthcheck() {
+func healthcheck(ha *lib.HTTPAdapter) {
 	r := mux.NewRouter()
-	r.HandleFunc("/health", lib.HealthHandler).Methods("GET")
+	r.HandleFunc("/health", ha.HealthHandler).Methods("GET")
 	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.HealthcheckHTTPport)
 	server := &http.Server{Addr: addr, Handler: r}
 	logger.Printf("HTTP healthcheck listening on: %v", addr)
 	logger.Println(server.ListenAndServe())
-}
-
-func startgRPC(mc lib.MetricsCollector, dc lib.ImageBuildClient) {
-	gf := lib.NewGitHubFetcher(gitConfig.Token)
-	osm := lib.NewS3StorageManager(awsConfig, mc, logger)
-	is := lib.NewDockerImageSquasher(logger)
-	s3errcfg := lib.S3ErrorLogConfig{
-		PushToS3:          serverConfig.S3ErrorLogs,
-		Region:            serverConfig.S3ErrorLogRegion,
-		Bucket:            serverConfig.S3ErrorLogBucket,
-		PresignTTLMinutes: serverConfig.S3PresignTTL,
-	}
-	imageBuilder, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, dockerConfig.DockercfgContents, s3errcfg, logger)
-	if err != nil {
-		log.Fatalf("error creating image builder: %v", err)
-	}
-	grpcSvr := lib.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, serverConfig.Queuesize, serverConfig.Concurrency, logger)
-	go grpcSvr.ListenRPC(serverConfig.GRPCAddr, serverConfig.GRPCPort)
 }
 
 func startGC(dc lib.ImageBuildClient, mc lib.MetricsCollector, log *log.Logger, interval uint) {
@@ -134,15 +116,32 @@ func server(cmd *cobra.Command, args []string) {
 		log.Fatalf("error creating Docker client: %v", err)
 	}
 
-	startgRPC(mc, dc)
+	gf := lib.NewGitHubFetcher(gitConfig.Token)
+	osm := lib.NewS3StorageManager(awsConfig, mc, logger)
+	is := lib.NewDockerImageSquasher(logger)
+	s3errcfg := lib.S3ErrorLogConfig{
+		PushToS3:          serverConfig.S3ErrorLogs,
+		Region:            serverConfig.S3ErrorLogRegion,
+		Bucket:            serverConfig.S3ErrorLogBucket,
+		PresignTTLMinutes: serverConfig.S3PresignTTL,
+	}
+	imageBuilder, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, dockerConfig.DockercfgContents, s3errcfg, logger)
+	if err != nil {
+		log.Fatalf("error creating image builder: %v", err)
+	}
+	grpcSvr := lib.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, serverConfig.Queuesize, serverConfig.Concurrency, logger)
+	go grpcSvr.ListenRPC(serverConfig.GRPCAddr, serverConfig.GRPCPort)
+
+	ha := lib.NewHTTPAdapter(grpcSvr)
+
 	startGC(dc, mc, logger, serverConfig.GCIntervalSecs)
-	go healthcheck()
+	go healthcheck(ha)
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
-	r.HandleFunc("/build", lib.BuildRequestHandler).Methods("POST")
-	r.HandleFunc("/build/{id}", lib.BuildStatusHandler).Methods("GET")
-	r.HandleFunc("/build/{id}", lib.BuildCancelHandler).Methods("DELETE")
+	r.HandleFunc("/build", ha.BuildRequestHandler).Methods("POST")
+	r.HandleFunc("/build/{id}", ha.BuildStatusHandler).Methods("GET")
+	r.HandleFunc("/build/{id}", ha.BuildCancelHandler).Methods("DELETE")
 
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	addr := fmt.Sprintf("%v:%v", serverConfig.HTTPSAddr, serverConfig.HTTPSPort)
