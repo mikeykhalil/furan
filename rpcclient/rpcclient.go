@@ -187,7 +187,7 @@ func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Buil
 	if err != nil {
 		return "", fmt.Errorf("error connecting to remote host: %v", err)
 	}
-	//defer conn.Close()
+	defer conn.Close()
 
 	c := NewFuranExecutorClient(conn)
 

@@ -50,7 +50,6 @@ type DBconfig struct {
 	Cluster           *gocql.ClusterConfig
 	Datalayer         DataLayer
 	Keyspace          string
-	RFPerDC           uint
 }
 
 type Serverconfig struct {

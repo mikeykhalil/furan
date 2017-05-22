@@ -14,10 +14,20 @@ import (
 	"golang.org/x/net/context"
 )
 
-var pbMarshaler jsonpb.Marshaler
+// HTTPAdapter holds the handlers for the HTTP endpoints
+type HTTPAdapter struct {
+	gr  *GrpcServer
+	pbm jsonpb.Marshaler
+}
+
+func NewHTTPAdapter(gr *GrpcServer) *HTTPAdapter {
+	return &HTTPAdapter{
+		gr: gr,
+	}
+}
 
 // any null values (omitted) will be deserialized as nil, replace with empty structs
-func unmarshalRequest(r io.Reader) (*BuildRequest, error) {
+func (ha *HTTPAdapter) unmarshalRequest(r io.Reader) (*BuildRequest, error) {
 	req := BuildRequest{}
 	err := jsonpb.Unmarshal(r, &req)
 	if err != nil {
@@ -41,87 +51,87 @@ func unmarshalRequest(r io.Reader) (*BuildRequest, error) {
 	return &req, nil
 }
 
-func handleRPCError(w http.ResponseWriter, err error) {
+func (ha *HTTPAdapter) handleRPCError(w http.ResponseWriter, err error) {
 	code := grpc.Code(err)
 	switch code {
 	case codes.InvalidArgument:
-		badRequestError(w, err)
+		ha.badRequestError(w, err)
 	case codes.Internal:
-		internalError(w, err)
+		ha.internalError(w, err)
 	default:
-		internalError(w, err)
+		ha.internalError(w, err)
 	}
 }
 
 // REST interface handlers (proxy to gRPC handlers)
-func BuildRequestHandler(w http.ResponseWriter, r *http.Request) {
-	req, err := unmarshalRequest(r.Body)
+func (ha *HTTPAdapter) BuildRequestHandler(w http.ResponseWriter, r *http.Request) {
+	req, err := ha.unmarshalRequest(r.Body)
 	if err != nil {
-		badRequestError(w, err)
+		ha.badRequestError(w, err)
 		return
 	}
-	resp, err := grpcSvr.StartBuild(context.Background(), req)
+	resp, err := ha.gr.StartBuild(context.Background(), req)
 	if err != nil {
-		handleRPCError(w, err)
+		ha.handleRPCError(w, err)
 		return
 	}
-	httpSuccess(w, resp)
+	ha.httpSuccess(w, resp)
 }
 
-func BuildStatusHandler(w http.ResponseWriter, r *http.Request) {
+func (ha *HTTPAdapter) BuildStatusHandler(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	req := BuildStatusRequest{
 		BuildId: id,
 	}
-	resp, err := grpcSvr.GetBuildStatus(context.Background(), &req)
+	resp, err := ha.gr.GetBuildStatus(context.Background(), &req)
 	if err != nil {
-		handleRPCError(w, err)
+		ha.handleRPCError(w, err)
 		return
 	}
-	httpSuccess(w, resp)
+	ha.httpSuccess(w, resp)
 }
 
-func BuildCancelHandler(w http.ResponseWriter, r *http.Request) {
+func (ha *HTTPAdapter) BuildCancelHandler(w http.ResponseWriter, r *http.Request) {
 	var req BuildCancelRequest
 	err := jsonpb.Unmarshal(r.Body, &req)
 	if err != nil {
-		badRequestError(w, err)
+		ha.badRequestError(w, err)
 		return
 	}
-	resp, err := grpcSvr.CancelBuild(context.Background(), &req)
+	resp, err := ha.gr.CancelBuild(context.Background(), &req)
 	if err != nil {
-		handleRPCError(w, err)
+		ha.handleRPCError(w, err)
 		return
 	}
-	httpSuccess(w, resp)
+	ha.httpSuccess(w, resp)
 }
 
-func httpSuccess(w http.ResponseWriter, resp proto.Message) {
-	js, err := pbMarshaler.MarshalToString(resp)
+func (ha *HTTPAdapter) httpSuccess(w http.ResponseWriter, resp proto.Message) {
+	js, err := ha.pbm.MarshalToString(resp)
 	if err != nil {
-		internalError(w, err)
+		ha.internalError(w, err)
 		return
 	}
 	w.Header().Add("Content-Type", "application/json")
 	w.Write([]byte(js))
 }
 
-func badRequestError(w http.ResponseWriter, err error) {
-	httpError(w, http.StatusBadRequest, err)
+func (ha *HTTPAdapter) badRequestError(w http.ResponseWriter, err error) {
+	ha.httpError(w, http.StatusBadRequest, err)
 }
 
-func internalError(w http.ResponseWriter, err error) {
-	httpError(w, http.StatusInternalServerError, err)
+func (ha *HTTPAdapter) internalError(w http.ResponseWriter, err error) {
+	ha.httpError(w, http.StatusInternalServerError, err)
 }
 
-func httpError(w http.ResponseWriter, code int, err error) {
+func (ha *HTTPAdapter) httpError(w http.ResponseWriter, code int, err error) {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write([]byte(fmt.Sprintf(`{"error_details":"%v"}`, err)))
 }
 
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
-	if cap(grpcSvr.workerChan) > 0 {
+func (ha *HTTPAdapter) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	if cap(ha.gr.workerChan) > 0 {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusTooManyRequests)

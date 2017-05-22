@@ -68,9 +68,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&dbConfig.ConsulServiceName, "svc-name", "v", "cassandra", "Consul service name for Cassandra")
 	RootCmd.PersistentFlags().StringVarP(&nodestr, "db-nodes", "n", "", "Comma-delimited list of Cassandra nodes (if not using Consul discovery)")
 	RootCmd.PersistentFlags().StringVarP(&datacenterstr, "db-dc", "d", "us-west-2", "Comma-delimited list of Cassandra datacenters (if not using Consul discovery)")
-	RootCmd.PersistentFlags().BoolVarP(&initializeDB, "db-init", "i", false, "Initialize DB keyspace and tables (only necessary on first run)")
+	RootCmd.PersistentFlags().BoolVarP(&initializeDB, "db-init", "i", false, "Initialize DB UDTs and tables if missing (only necessary on first run)")
 	RootCmd.PersistentFlags().StringVarP(&dbConfig.Keyspace, "db-keyspace", "b", "furan", "Cassandra keyspace")
-	RootCmd.PersistentFlags().UintVarP(&dbConfig.RFPerDC, "db-rf-per-dc", "l", 2, "Cassandra replication factor per DC (if initializing DB)")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.VaultPathPrefix, "vault-prefix", "x", "secret/production/furan", "Vault path prefix for secrets")
 	RootCmd.PersistentFlags().StringVarP(&gitConfig.TokenVaultPath, "github-token-path", "g", "/github/token", "Vault path (appended to prefix) for GitHub token")
 	RootCmd.PersistentFlags().StringVarP(&dockerConfig.DockercfgVaultPath, "vault-dockercfg-path", "e", "/dockercfg", "Vault path to .dockercfg contents")
@@ -144,6 +143,7 @@ func connectToDB() {
 		dbConfig.Nodes = nodes
 	}
 	dbConfig.Cluster = gocql.NewCluster(dbConfig.Nodes...)
+	dbConfig.Cluster.Keyspace = dbConfig.Keyspace
 	dbConfig.Cluster.ProtoVersion = 3
 	dbConfig.Cluster.NumConns = 20
 	dbConfig.Cluster.SocketKeepalive = 30 * time.Second
@@ -158,15 +158,7 @@ func setupDataLayer() {
 }
 
 func initDB() {
-	rfmap := map[string]uint{}
-	for _, dc := range dbConfig.DataCenters {
-		rfmap[dc] = dbConfig.RFPerDC
-	}
-	err := cassandra.CreateKeyspaceWithNetworkTopologyStrategy(dbConfig.Cluster, dbConfig.Keyspace, rfmap)
-	if err != nil {
-		log.Fatalf("error creating keyspace: %v", err)
-	}
-	err = cassandra.CreateRequiredTypes(dbConfig.Cluster, lib.RequiredUDTs)
+	err := cassandra.CreateRequiredTypes(dbConfig.Cluster, lib.RequiredUDTs)
 	if err != nil {
 		log.Fatalf("error creating UDTs: %v", err)
 	}

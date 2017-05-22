@@ -343,24 +343,25 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *BuildRequest, rbi *Rep
 	if err2 != nil {
 		return imageid, fmt.Errorf("error saving action output: %v", err2)
 	}
-	// Parse final stream event to find image ID
-	fes := output[len(output)-1].Message
-	dse := dockerStreamEvent{}
-	err = json.Unmarshal([]byte(fes), &dse)
-	if err != nil {
-		return imageid, fmt.Errorf("error marshaling final message to determine image id: %v", err)
+	walkback := len(rbi.Tags) + 1 // newer Docker engine versions have a message for each tag after the success message
+	var dse dockerStreamEvent
+	for i := 1; i <= walkback; i++ { // Parse final stream event to find image ID
+		fes := output[len(output)-i].Message
+		err = json.Unmarshal([]byte(fes), &dse)
+		if err != nil {
+			return imageid, fmt.Errorf("error marshaling final message to determine image id: %v", err)
+		}
+		if strings.HasPrefix(dse.Stream, buildSuccessEventPrefix) {
+			imageid = strings.TrimRight(dse.Stream[len(buildSuccessEventPrefix):len(dse.Stream)], "\n")
+			ib.logf(ctx, "built image ID %v", imageid)
+			err = ib.dl.SetBuildTimeMetric(id, "docker_build_completed")
+			if err != nil {
+				return imageid, err
+			}
+			return imageid, ib.writeDockerImageSizeMetrics(ctx, imageid, req.Build.GithubRepo, req.Build.Ref)
+		}
 	}
-	if strings.HasPrefix(dse.Stream, buildSuccessEventPrefix) {
-		imageid = strings.TrimRight(dse.Stream[len(buildSuccessEventPrefix):len(dse.Stream)], "\n")
-	} else {
-		return imageid, fmt.Errorf("could not determine image id from final event: %v", dse.Stream)
-	}
-	ib.logf(ctx, "built image ID %v", imageid)
-	err = ib.dl.SetBuildTimeMetric(id, "docker_build_completed")
-	if err != nil {
-		return imageid, err
-	}
-	return imageid, ib.writeDockerImageSizeMetrics(ctx, imageid, req.Build.GithubRepo, req.Build.Ref)
+	return imageid, fmt.Errorf("could not determine image id from final event: %v", dse.Stream)
 }
 
 func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid string, repo string, ref string) error {

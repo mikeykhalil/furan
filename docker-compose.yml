@@ -1,0 +1,51 @@
+version: '2.1'
+services:
+  zookeeper:
+    image: confluent/zookeeper
+    ports:
+      - "2181"
+  kafka:
+    image: confluent/kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: kafka
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    depends_on:
+      - zookeeper
+  scylla:
+    image: scylladb/scylla
+    ports:
+      - "9042:9042"
+    healthcheck:
+      test: >
+        cqlsh -e "CREATE KEYSPACE IF NOT EXISTS furan WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor': 1 } AND DURABLE_WRITES = true;"
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  furan:
+    build: .
+    image: furan:local
+    environment:
+      - VAULT_TOKEN
+      - VAULT_ADDR
+      - DOCKER_HOST
+      - DOCKER_API_VERSION
+      - DOCKER_TLS_VERIFY
+      - DOCKER_CERT_PATH=/opt/docker-certs
+    # delay startup to wait for other services to be ready and for network links to come up
+    command: /bin/sh -c 'echo "starting (delay)" && sleep 20 && /go/bin/furan -k -i -n scylla -f kafka:9092 server --log-to-sumo=false'
+    ports:
+      - "4000:4000"
+      - "4001:4001"
+      - "4002:4002"
+    depends_on:
+      - kafka
+      - scylla
+    volumes:
+      - "$DOCKER_CERT_PATH:/opt/docker-certs"
+    healthcheck:
+      test: echo 'GET /' |nc localhost 4002
+      interval: 25s
+      timeout: 5s
+      retries: 10

@@ -140,6 +140,7 @@ const (
 
 var tn = os.Getenv("SCYLLA_TEST_NODE")
 var ts *gocql.Session
+var dbConfig DBconfig
 
 func setupTestDB() {
 	// create keyspace
@@ -160,18 +161,18 @@ func setupTestDB() {
 
 	// DB setup
 	c.Keyspace = testKeyspace
-	dbConfig.cluster = c
-	dbConfig.nodes = []string{tn}
-	dbConfig.keyspace = testKeyspace
-	err = cassandra.CreateRequiredTypes(dbConfig.cluster, requiredUDTs)
+	dbConfig.Cluster = c
+	dbConfig.Nodes = []string{tn}
+	dbConfig.Keyspace = testKeyspace
+	err = cassandra.CreateRequiredTypes(dbConfig.Cluster, RequiredUDTs)
 	if err != nil {
 		log.Fatalf("error creating UDTs: %v", err)
 	}
-	err = cassandra.CreateRequiredTables(dbConfig.cluster, requiredTables)
+	err = cassandra.CreateRequiredTables(dbConfig.Cluster, RequiredTables)
 	if err != nil {
 		log.Fatalf("error creating tables: %v", err)
 	}
-	ts, err = dbConfig.cluster.CreateSession()
+	ts, err = dbConfig.Cluster.CreateSession()
 	if err != nil {
 		log.Fatalf("error getting session: %v", err)
 	}
