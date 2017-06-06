@@ -5,8 +5,7 @@
 
 -----
 
-<h4 align="center">Furan builds and pushes Docker images from a specified GitHub repository
-to a specified target.</h4>
+<h4 align="center">Furan is a Docker build microservice that builds and pushes Docker images from a specified GitHub repository to a specified target.</h4>
 
 -----
 
