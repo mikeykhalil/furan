@@ -23,12 +23,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+  vault:
+    image: quay.io/dollarshaveclub/vault-dev:master
+    ports:
+      - "8200:8200"
+    volumes:
+      - "$PWD/local_dev_secrets.json:/opt/secrets.json"
   furan:
     build: .
     image: furan:local
     environment:
-      - VAULT_TOKEN
-      - VAULT_ADDR
+      - VAULT_TOKEN=root
+      - VAULT_ADDR=http://vault:8200
       - DOCKER_HOST
       - DOCKER_API_VERSION
       - DOCKER_TLS_VERIFY
@@ -42,6 +48,7 @@ services:
     depends_on:
       - kafka
       - scylla
+      - vault
     volumes:
       - "$DOCKER_CERT_PATH:/opt/docker-certs"
     healthcheck:
