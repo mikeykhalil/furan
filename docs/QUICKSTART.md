@@ -15,7 +15,21 @@ monitor the build which will stream build and push events in realtime. The user
 also has the option of polling the build status instead of realtime monitoring
 until it finishes.
 
-Examples
---------
+Dependencies
+------------
+
+- Cassandra 2.x / ScyllaDB 1.x: Primary application datastore.
+- Vault: datastore for application secrets (AWS credentials, GitHub token, TLS cert/key)
+- Kafka: used as a message bus for build events, so that a build can be monitored from any node (not just the node physically running the build)
+
+Getting Started
+---------------
+
+``$ docker-compose up``
+
+Dependencies and how to run Furan are best documented in ``docker-compose.yml``.
+
+Production Examples
+-------------------
 
 [CoreOS cloud-init with RAM disk](https://github.com/dollarshaveclub/furan/blob/master/docs/coreos-ramdisk.yml)
