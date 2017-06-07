@@ -23,7 +23,7 @@
 
 - **Furan is secure!** Furan integrates with [Vault](https://www.vaultproject.io) for secure storage of service credentials (Docker registries, AWS). Furan supports token and AppID authentication.
 
-- **Furan is instrumented!** Furan has full Datadog integration so you can monitor the size of your docker images over time, build durations, build failures and more.
+- **Furan is instrumented!** Furan has full Datadog integration so you can monitor the size of your docker images over time, build durations, build failures and more. [Screenshot](https://s3.amazonaws.com/dsc-misc/furan-datadog-dashboard.png)
 
 ## Dependencies
 
