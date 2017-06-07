@@ -25,13 +25,6 @@
 
 - **Furan is instrumented!** Furan has full Datadog integration so you can monitor the size of your docker images over time, build durations, build failures and more. [Screenshot](https://s3.amazonaws.com/dsc-misc/furan-datadog-dashboard.png)
 
-## Dependencies
-
--  Cassandra 2.x (ScyllaDB 1.x) (main datastore)
--  Kafka 0.9.x (for build events)
--  Vault 0.6.0+ (for secure credential retrieval)
--  Docker 1.6+
-
 ## API
 
 The native API for Furan is based on [GRPC](http://www.grpc.io) and supports
