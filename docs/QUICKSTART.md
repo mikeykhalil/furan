@@ -18,9 +18,9 @@ until it finishes.
 Dependencies
 ------------
 
-- Cassandra 2.x / ScyllaDB 1.x: Primary application datastore.
-- Vault: datastore for application secrets (AWS credentials, GitHub token, TLS cert/key)
-- Kafka: used as a message bus for build events, so that a build can be monitored from any node (not just the node physically running the build)
+- Cassandra 2.x / ScyllaDB 1.x: Primary application datastore. Usage is light, a shared C* installation should be fine in almost all cases.
+- Vault: datastore for application secrets (AWS credentials, GitHub token, TLS cert/key). Token or AppID authentication is supported out of the box.
+- Kafka: used as a message bus for build events, so that a build can be monitored from any node (not just the node physically running the build). The Kafka cluster does not need to be dedicated--Furan's usage is relatively light. Message TTL need only be as long as your longest expected Docker build. One hour should be more than sufficient.
 
 Getting Started
 ---------------
@@ -28,6 +28,8 @@ Getting Started
 ``$ docker-compose up``
 
 Dependencies and how to run Furan are best documented in ``docker-compose.yml``.
+
+The Docker Compose setup will spin up and initialize all dependencies and then bring up Furan.
 
 Production Examples
 -------------------
