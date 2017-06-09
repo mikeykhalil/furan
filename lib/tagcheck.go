@@ -2,6 +2,7 @@ package lib
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/dollarshaveclub/go-lib/set"
@@ -14,13 +15,15 @@ type ImageTagChecker interface {
 
 // RegistryTagChecker is an object that can check a remote registry for a set of tags
 type RegistryTagChecker struct {
-	dockercfg *Dockerconfig
+	dockercfg  *Dockerconfig
+	loggerFunc func(string, ...interface{})
 }
 
 // NewRegistryTagChecker returns a RegistryTagChecker using the specified dockercfg for authentication
-func NewRegistryTagChecker(dockercfg *Dockerconfig) *RegistryTagChecker {
+func NewRegistryTagChecker(dockercfg *Dockerconfig, loggerFunc func(string, ...interface{})) *RegistryTagChecker {
 	return &RegistryTagChecker{
-		dockercfg: dockercfg,
+		dockercfg:  dockercfg,
+		loggerFunc: loggerFunc,
 	}
 }
 
@@ -29,16 +32,25 @@ func NewRegistryTagChecker(dockercfg *Dockerconfig) *RegistryTagChecker {
 func (rtc *RegistryTagChecker) AllTagsExist(tags []string, repo string) (bool, []string, error) {
 	rs := strings.Split(repo, "/")
 	if len(rs) != 3 {
-		return false, nil, fmt.Errorf("bad format for repo: expected [host]/[namespace]/[repository]: %v", repo)
+		if len(rs) != 2 {
+			return false, nil, fmt.Errorf("bad format for repo: expected [host]/[namespace]/[repository] or [namespace]/[repository]: %v", repo)
+		}
+		rs = []string{"registry-1.docker.io", rs[0], rs[1]}
 	}
-	host := rs[0]
-	ac, ok := rtc.dockercfg.DockercfgContents[host]
-	if !ok {
-		return false, nil, fmt.Errorf("auth for host not found in dockercfg: %v", host)
+	if len(tags) == 0 {
+		return false, nil, fmt.Errorf("at least one tag is required")
 	}
-	reg, err := registry.New(host, ac.Username, ac.Password)
-	if err != nil {
-		return false, nil, fmt.Errorf("error setting up registry client: %v: %v", repo, err)
+	hc := &http.Client{}
+	url := "https://" + rs[0]
+	ac, ok := rtc.dockercfg.DockercfgContents[rs[0]]
+	if ok { // if missing, anonymous auth
+		hc.Transport = registry.WrapTransport(http.DefaultTransport, url, ac.Username, ac.Password)
+	}
+	// reg.Ping() fails for quay.io, so we manually construct a registry client here
+	reg := registry.Registry{
+		URL:    url,
+		Client: hc,
+		Logf:   rtc.loggerFunc,
 	}
 	ts, err := reg.Tags(fmt.Sprintf("%v/%v", rs[1], rs[2]))
 	if err != nil {
