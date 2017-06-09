@@ -5,9 +5,11 @@
 
 -----
 
-<h4 align="center">Furan is a Docker build microservice that builds and pushes Docker images from a specified GitHub repository to a specified target.</h4>
+<h4 align="center">Scale out Docker builds</h4>
 
 -----
+
+Furan is a horizontally-scalable Docker build microservice (API) that builds and pushes Docker images from a specified GitHub repository to a specified target (registry or S3).
 
 <h3 align="center">&middot;&middot;&middot;</h3>
 
