@@ -111,7 +111,7 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("Error getting dockercfg: %v", err)
 	}
 
-	gf := lib.NewGitHubFetcher(gitConfig.Token)
+	gf := lib.NewGitHubFetcher(gitConfig.Token, serverConfig.DiskCacheDir)
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		clierr("error creating Docker client: %v", err)
