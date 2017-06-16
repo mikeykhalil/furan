@@ -56,7 +56,7 @@ func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.S3PresignTTL, "s3-error-log-presign-ttl", 60*24, "Presigned error log URL TTL in minutes (0 to disable)")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.GCIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.DockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
-	serverCmd.PersistentFlags().StringVar(&serverConfig.DiskCacheDir, "disk-cache-dir", "/tmp", "Where to store temporary data")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.DiskCacheDir, "disk-cache-dir", os.TempDir(), "Where to store temporary data")
 	RootCmd.AddCommand(serverCmd)
 }
 
