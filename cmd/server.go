@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	// Enable pprof profiles
+	// Import pprof handlers into http.DefaultServeMux
 	_ "net/http/pprof"
 
 	docker "github.com/docker/engine-api/client"
@@ -41,6 +41,7 @@ func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.HTTPSPort, "https-port", 4000, "REST HTTPS TCP port")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.GRPCPort, "grpc-port", 4001, "gRPC TCP port")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.HealthcheckHTTPport, "healthcheck-port", 4002, "Healthcheck HTTP port (listens on localhost only)")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.PPROFPort, "pprof-port", 4003, "Port for serving pprof profiles")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.HTTPSAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.GRPCAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.Concurrency, "concurrency", 10, "Max concurrent builds")
@@ -80,6 +81,12 @@ func healthcheck(ha *lib.HTTPAdapter) {
 	server := &http.Server{Addr: addr, Handler: r}
 	logger.Printf("HTTP healthcheck listening on: %v", addr)
 	logger.Println(server.ListenAndServe())
+}
+
+func pprof() {
+	// pprof installs handlers into http.DefaultServeMux
+	logger.Println(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", serverConfig.PPROFPort), nil))
+	logger.Printf("pprof listening on port: %v", serverConfig.PPROFPort)
 }
 
 func startGC(dc lib.ImageBuildClient, mc lib.MetricsCollector, log *log.Logger, interval uint) {
@@ -139,6 +146,7 @@ func server(cmd *cobra.Command, args []string) {
 
 	startGC(dc, mc, logger, serverConfig.GCIntervalSecs)
 	go healthcheck(ha)
+	go pprof()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
