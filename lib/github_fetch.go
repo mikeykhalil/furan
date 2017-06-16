@@ -159,7 +159,7 @@ type tempTarball struct {
 }
 
 func newTempTarball() (*tempTarball, error) {
-	f, err := ioutil.TempFile("/tmp", "furan-github-tarball")
+	f, err := ioutil.TempFile("", "furan-github-tarball")
 	if err != nil {
 		return nil, err
 	}
