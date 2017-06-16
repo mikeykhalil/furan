@@ -9,6 +9,9 @@ import (
 	"os"
 	"time"
 
+	// Enable pprof profiles
+	_ "net/http/pprof"
+
 	docker "github.com/docker/engine-api/client"
 	"github.com/dollarshaveclub/furan/lib"
 	"github.com/gorilla/mux"
