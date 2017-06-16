@@ -31,15 +31,17 @@ type CodeFetcher interface {
 
 // GitHubFetcher represents a github data fetcher
 type GitHubFetcher struct {
-	c *github.Client
+	c            *github.Client
+	diskCacheDir string
 }
 
 // NewGitHubFetcher returns a new github fetcher
-func NewGitHubFetcher(token string) *GitHubFetcher {
+func NewGitHubFetcher(token, diskCacheDir string) *GitHubFetcher {
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(oauth2.NoContext, ts)
 	gf := &GitHubFetcher{
-		c: github.NewClient(tc),
+		c:            github.NewClient(tc),
+		diskCacheDir: diskCacheDir,
 	}
 	return gf
 }
@@ -102,7 +104,7 @@ func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.ReadCloser, err
 		return nil, fmt.Errorf("error creating gzip reader: %v", err)
 	}
 	defer gzr.Close()
-	output, err := newTempTarball()
+	output, err := newTempTarball(gf.diskCacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +160,8 @@ type tempTarball struct {
 	*os.File
 }
 
-func newTempTarball() (*tempTarball, error) {
-	f, err := ioutil.TempFile("", "furan-github-tarball")
+func newTempTarball(diskCacheDir string) (*tempTarball, error) {
+	f, err := ioutil.TempFile(diskCacheDir, "furan-tarball")
 	if err != nil {
 		return nil, err
 	}
