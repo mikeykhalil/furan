@@ -114,6 +114,11 @@ func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.ReadCloser, err
 		h, err := intar.Next()
 		if err != nil {
 			if err == io.EOF {
+				// Rewind the file so it can now be
+				// read.
+				if _, err := output.Seek(0, 0); err != nil {
+					return nil, err
+				}
 				return output, nil
 			}
 			return nil, fmt.Errorf("error reading input tar entry: %v", err)
