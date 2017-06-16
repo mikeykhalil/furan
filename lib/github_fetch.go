@@ -2,7 +2,6 @@ package lib
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -10,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -26,7 +26,7 @@ const (
 // gzip-compressed tarball io.Reader
 type CodeFetcher interface {
 	GetCommitSHA(string, string, string) (string, error)
-	Get(string, string, string) (io.Reader, error)
+	Get(string, string, string) (io.ReadCloser, error)
 }
 
 // GitHubFetcher represents a github data fetcher
@@ -52,7 +52,7 @@ func (gf *GitHubFetcher) GetCommitSHA(owner string, repo string, ref string) (st
 
 // Get fetches contents of GitHub repo and returns the processed contents as
 // an in-memory io.Reader.
-func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.Reader, err error) {
+func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.ReadCloser, err error) {
 	opt := &github.RepositoryContentGetOptions{
 		Ref: ref,
 	}
@@ -63,7 +63,7 @@ func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.
 	return gf.getArchive(url)
 }
 
-func (gf *GitHubFetcher) getArchive(archiveURL *url.URL) (io.Reader, error) {
+func (gf *GitHubFetcher) getArchive(archiveURL *url.URL) (io.ReadCloser, error) {
 	hc := http.Client{
 		Timeout: githubDownloadTimeoutSecs * time.Second,
 	}
@@ -95,14 +95,17 @@ func (gf *GitHubFetcher) debugWriteTar(contents []byte) {
 // strip that prefix to get an archive suitable for a Docker build context.
 // Note that we do not compress the output tar archive since we assume callers
 // will be passing it to the Docker engine running on localhost
-func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.Reader, error) {
+func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.ReadCloser, error) {
 	defer input.Close()
 	gzr, err := gzip.NewReader(input)
 	if err != nil {
 		return nil, fmt.Errorf("error creating gzip reader: %v", err)
 	}
 	defer gzr.Close()
-	output := bytes.NewBuffer(nil)
+	output, err := newTempTarball()
+	if err != nil {
+		return nil, err
+	}
 	intar := tar.NewReader(gzr)
 	outtar := tar.NewWriter(output)
 	defer outtar.Close()
@@ -142,4 +145,25 @@ func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.Reader, error) 
 			return nil, fmt.Errorf("error writing output tar contents: %v", err)
 		}
 	}
+}
+
+// tempTarball is a io.ReadCloser that's backed by disk. Upon closing,
+// the underlying file is deleted.
+type tempTarball struct {
+	*os.File
+}
+
+func newTempTarball() (*tempTarball, error) {
+	f, err := ioutil.TempFile("/tmp", "furan-github-tarball")
+	if err != nil {
+		return nil, err
+	}
+	return &tempTarball{File: f}, nil
+}
+
+func (t *tempTarball) Close() error {
+	if err := t.File.Close(); err != nil {
+		return err
+	}
+	return os.Remove(t.Name())
 }
