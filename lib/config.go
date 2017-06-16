@@ -55,6 +55,7 @@ type DBconfig struct {
 type Serverconfig struct {
 	HTTPSPort           uint
 	GRPCPort            uint
+	PPROFPort           uint
 	HTTPSAddr           string
 	GRPCAddr            string
 	Concurrency         uint
