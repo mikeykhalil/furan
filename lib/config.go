@@ -58,7 +58,6 @@ type Serverconfig struct {
 	PPROFPort           uint
 	HTTPSAddr           string
 	GRPCAddr            string
-	DiskCacheDir        string
 	Concurrency         uint
 	Queuesize           uint
 	VaultTLSCertPath    string
