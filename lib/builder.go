@@ -230,7 +230,6 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	if err != nil {
 		return "", err
 	}
-	defer contents.Close()
 	var dp string
 	if req.Build.DockerfilePath == "" {
 		dp = "Dockerfile"
