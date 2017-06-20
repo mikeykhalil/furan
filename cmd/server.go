@@ -1,12 +1,17 @@
+// +build linux darwin freebsd netbsd openbsd
+
 package cmd
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	// Import pprof handlers into http.DefaultServeMux
@@ -144,6 +149,10 @@ func server(cmd *cobra.Command, args []string) {
 
 	ha := lib.NewHTTPAdapter(grpcSvr)
 
+	stop := make(chan os.Signal, 10)
+	signal.Notify(stop, syscall.SIGTERM) //non-portable outside of POSIX systems
+	signal.Notify(stop, os.Interrupt)
+
 	startGC(dc, mc, logger, serverConfig.GCIntervalSecs)
 	go healthcheck(ha)
 	go pprof()
@@ -157,8 +166,20 @@ func server(cmd *cobra.Command, args []string) {
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	addr := fmt.Sprintf("%v:%v", serverConfig.HTTPSAddr, serverConfig.HTTPSPort)
 	server := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsconfig}
+
+	go func() {
+		_ = <-stop
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		server.Shutdown(ctx)
+		cancel()
+	}()
+
 	logger.Printf("HTTPS REST listening on: %v", addr)
 	logger.Println(server.ListenAndServeTLS(certPath, keyPath))
+	logger.Printf("shutting down GRPC and aborting builds...")
+	grpcSvr.Shutdown()
+	close(stop)
+	logger.Printf("done, exiting")
 }
 
 var version, description string

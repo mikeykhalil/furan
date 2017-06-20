@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -14,6 +15,41 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// activeBuildMap contains a map of build ID to CancelFunc to allow cancellation
+type activeBuildMap struct {
+	sync.Mutex
+	m          map[gocql.UUID]context.CancelFunc
+	loggerFunc func(string, ...interface{})
+}
+
+func (abm *activeBuildMap) AddBuild(id gocql.UUID, cf context.CancelFunc) {
+	abm.Lock()
+	defer abm.Unlock()
+	abm.m[id] = cf
+}
+
+func (abm *activeBuildMap) Cancel(id gocql.UUID) error {
+	abm.Lock()
+	defer abm.Unlock()
+	if cf, ok := abm.m[id]; ok {
+		abm.loggerFunc("cancelling build %v", id.String())
+		cf()
+		delete(abm.m, id)
+		return nil
+	}
+	return fmt.Errorf("id not found")
+}
+
+func (abm *activeBuildMap) CancelAll() {
+	abm.Lock()
+	defer abm.Unlock()
+	for id, cf := range abm.m {
+		abm.loggerFunc("cancelling build %v", id.String())
+		cf()
+		delete(abm.m, id)
+	}
+}
+
 // GrpcServer represents an object that responds to gRPC calls
 type GrpcServer struct {
 	ib         ImageBuildPusher
@@ -22,7 +58,11 @@ type GrpcServer struct {
 	ec         EventBusConsumer
 	ls         io.Writer
 	mc         MetricsCollector
+	abm        activeBuildMap
+	wcf        []context.CancelFunc // worker CancelFuncs
+	wwg        *sync.WaitGroup      //async goroutines waitgroup
 	logger     *log.Logger
+	s          *grpc.Server
 	workerChan chan *workerRequest
 	qsize      uint
 	wcnt       uint
@@ -86,6 +126,8 @@ func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec Ev
 		ep:         ep,
 		ec:         ec,
 		mc:         mc,
+		wcf:        []context.CancelFunc{},
+		wwg:        &sync.WaitGroup{},
 		logger:     logger,
 		workerChan: make(chan *workerRequest, queuesize),
 		qsize:      queuesize,
@@ -97,26 +139,40 @@ func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec Ev
 
 func (gr *GrpcServer) runWorkers() {
 	for i := 0; uint(i) < gr.wcnt; i++ {
-		go gr.buildWorker()
+		ctx, cf := context.WithCancel(context.Background())
+		gr.wcf = append(gr.wcf, cf)
+		gr.wwg.Add(1)
+		go func() { defer gr.wwg.Done(); gr.buildWorker(ctx) }()
 	}
 	gr.logf("%v workers running (queue: %v)", gr.wcnt, gr.qsize)
 }
 
-func (gr *GrpcServer) buildWorker() {
+func (gr *GrpcServer) buildWorker(ctx context.Context) {
 	var wreq *workerRequest
 	var err error
 	var id gocql.UUID
 	for {
-		wreq = <-gr.workerChan
-		if !isCancelled(wreq.ctx.Done()) {
-			gr.syncBuild(wreq.ctx, wreq.req)
-		} else {
-			id, _ = BuildIDFromContext(wreq.ctx)
-			gr.logf("context is cancelled, skipping: %v", id)
-			if err = gr.dl.DeleteBuild(id); err != nil {
-				gr.logf("error deleting build: %v", err)
+		select {
+		case wreq = <-gr.workerChan:
+			if !isCancelled(wreq.ctx.Done()) {
+				gr.syncBuild(wreq.ctx, wreq.req)
+			} else {
+				id, _ = BuildIDFromContext(wreq.ctx)
+				gr.logf("context is cancelled, skipping: %v", id)
+				if err = gr.dl.DeleteBuild(id); err != nil {
+					gr.logf("error deleting build: %v", err)
+				}
 			}
+		case <-ctx.Done():
+			gr.logf("worker: cancelled, exiting")
+			return
 		}
+	}
+}
+
+func (gr *GrpcServer) cancelWorkers() {
+	for _, cf := range gr.wcf {
+		cf()
 	}
 }
 
@@ -129,6 +185,7 @@ func (gr *GrpcServer) ListenRPC(addr string, port uint) error {
 		return err
 	}
 	s := grpc.NewServer()
+	gr.s = s
 	RegisterFuranExecutorServer(s, gr)
 	gr.logf("gRPC listening on: %v", addr)
 	return s.Serve(l)
@@ -301,13 +358,15 @@ func (gr *GrpcServer) StartBuild(ctx context.Context, req *BuildRequest) (*Build
 	if err != nil {
 		return nil, grpc.Errorf(codes.Internal, "error creating build in DB: %v", err)
 	}
-	ctx = NewBuildIDContext(context.Background(), id)
+	var cf context.CancelFunc
+	ctx, cf = context.WithCancel(NewBuildIDContext(context.Background(), id))
 	wreq := workerRequest{
 		ctx: ctx,
 		req: req,
 	}
 	select {
 	case gr.workerChan <- &wreq:
+		gr.abm.AddBuild(id, cf)
 		gr.logf("queueing build: %v", id.String())
 		resp.BuildId = id.String()
 		return resp, nil
@@ -404,6 +463,14 @@ func (gr *GrpcServer) MonitorBuild(req *BuildStatusRequest, stream FuranExecutor
 }
 
 // CancelBuild stops a currently-running build
-func (gr *GrpcServer) CancelBuild(ctx context.Context, req *BuildCancelRequest) (*BuildStatusResponse, error) {
-	return &BuildStatusResponse{}, nil
+func (gr *GrpcServer) CancelBuild(ctx context.Context, req *BuildCancelRequest) (*BuildCancelResponse, error) {
+	return nil, grpc.Errorf(codes.Unimplemented, "cancellation not implemented")
+}
+
+// Shutdown gracefully stops the GRPC server, signals all workers and builds to stop and then waits for goroutines to finish
+func (gr *GrpcServer) Shutdown() {
+	gr.s.GracefulStop() // stop GRPC server
+	gr.cancelWorkers()  // signal all workers to stop processing jobs
+	gr.abm.CancelAll()  // cancel all running builds
+	gr.wwg.Wait()       // wait for workers to return
 }
