@@ -50,6 +50,13 @@ func (abm *activeBuildMap) CancelAll() {
 	}
 }
 
+func newActiveBuildMap(logger *log.Logger) activeBuildMap {
+	return activeBuildMap{
+		m:          make(map[gocql.UUID]context.CancelFunc),
+		loggerFunc: logger.Printf,
+	}
+}
+
 // GrpcServer represents an object that responds to gRPC calls
 type GrpcServer struct {
 	ib         ImageBuildPusher
@@ -126,6 +133,7 @@ func NewGRPCServer(ib ImageBuildPusher, dl DataLayer, ep EventBusProducer, ec Ev
 		ep:         ep,
 		ec:         ec,
 		mc:         mc,
+		abm:        newActiveBuildMap(logger),
 		wcf:        []context.CancelFunc{},
 		wwg:        &sync.WaitGroup{},
 		logger:     logger,
