@@ -6,7 +6,7 @@ service FuranExecutor {
   rpc StartBuild (BuildRequest) returns (BuildRequestResponse) {}
   rpc GetBuildStatus (BuildStatusRequest) returns (BuildStatusResponse) {}
   rpc MonitorBuild (BuildStatusRequest) returns (stream BuildEvent) {}
-  rpc CancelBuild (BuildCancelRequest) returns (BuildStatusResponse) {}
+  rpc CancelBuild (BuildCancelRequest) returns (BuildCancelResponse) {}
 }
 
 message BuildDefinition {
@@ -51,6 +51,10 @@ message BuildCancelRequest {
 
 message BuildRequestResponse {
   string build_id = 2;
+}
+
+message BuildCancelResponse {
+  string build_id = 1;
 }
 
 message BuildStatusResponse {
