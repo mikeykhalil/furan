@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestTarPrefixStripper(t *testing.T) {
+func TestGitHubFetchTarPrefixStripper(t *testing.T) {
 	tarballBuf := &bytes.Buffer{}
 	gzipWriter := gzip.NewWriter(tarballBuf)
 	tarWriter := tar.NewWriter(gzipWriter)
@@ -71,5 +71,13 @@ func TestTarPrefixStripper(t *testing.T) {
 	}
 	if string(contents2) != "contents2" {
 		t.Fatalf("invalid file contents")
+	}
+}
+
+func TestGitHubFetchGet(t *testing.T) {
+	ghf := NewGitHubFetcher("invalid")
+	_, err := ghf.Get("dollarshaveclub", "shave", "master")
+	if err != nil {
+		t.Fatalf("should have succeeded: %v", err)
 	}
 }
