@@ -1,13 +1,21 @@
+// +build linux darwin freebsd netbsd openbsd
+
 package cmd
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
+	// Import pprof handlers into http.DefaultServeMux
+	_ "net/http/pprof"
 
 	docker "github.com/docker/engine-api/client"
 	"github.com/dollarshaveclub/furan/lib"
@@ -38,6 +46,7 @@ func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.HTTPSPort, "https-port", 4000, "REST HTTPS TCP port")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.GRPCPort, "grpc-port", 4001, "gRPC TCP port")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.HealthcheckHTTPport, "healthcheck-port", 4002, "Healthcheck HTTP port (listens on localhost only)")
+	serverCmd.PersistentFlags().UintVar(&serverConfig.PPROFPort, "pprof-port", 4003, "Port for serving pprof profiles")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.HTTPSAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.GRPCAddr, "grpc-addr", "0.0.0.0", "gRPC listen address")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.Concurrency, "concurrency", 10, "Max concurrent builds")
@@ -77,6 +86,12 @@ func healthcheck(ha *lib.HTTPAdapter) {
 	server := &http.Server{Addr: addr, Handler: r}
 	logger.Printf("HTTP healthcheck listening on: %v", addr)
 	logger.Println(server.ListenAndServe())
+}
+
+func pprof() {
+	// pprof installs handlers into http.DefaultServeMux
+	logger.Println(http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", serverConfig.PPROFPort), nil))
+	logger.Printf("pprof listening on port: %v", serverConfig.PPROFPort)
 }
 
 func startGC(dc lib.ImageBuildClient, mc lib.MetricsCollector, log *log.Logger, interval uint) {
@@ -134,8 +149,13 @@ func server(cmd *cobra.Command, args []string) {
 
 	ha := lib.NewHTTPAdapter(grpcSvr)
 
+	stop := make(chan os.Signal, 10)
+	signal.Notify(stop, syscall.SIGTERM) //non-portable outside of POSIX systems
+	signal.Notify(stop, os.Interrupt)
+
 	startGC(dc, mc, logger, serverConfig.GCIntervalSecs)
 	go healthcheck(ha)
+	go pprof()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", versionHandler).Methods("GET")
@@ -146,8 +166,20 @@ func server(cmd *cobra.Command, args []string) {
 	tlsconfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	addr := fmt.Sprintf("%v:%v", serverConfig.HTTPSAddr, serverConfig.HTTPSPort)
 	server := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsconfig}
+
+	go func() {
+		_ = <-stop
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		server.Shutdown(ctx)
+		cancel()
+	}()
+
 	logger.Printf("HTTPS REST listening on: %v", addr)
 	logger.Println(server.ListenAndServeTLS(certPath, keyPath))
+	logger.Printf("shutting down GRPC and aborting builds...")
+	grpcSvr.Shutdown()
+	close(stop)
+	logger.Printf("done, exiting")
 }
 
 var version, description string

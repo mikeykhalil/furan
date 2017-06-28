@@ -3,6 +3,7 @@ package cluster
 import (
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/Shopify/sarama"
 )
@@ -121,8 +122,9 @@ func (c *partitionConsumer) MarkOffset(offset int64, metadata string) {
 // --------------------------------------------------------------------
 
 type partitionState struct {
-	Info  offsetInfo
-	Dirty bool
+	Info       offsetInfo
+	Dirty      bool
+	LastCommit time.Time
 }
 
 // --------------------------------------------------------------------
@@ -138,6 +140,18 @@ func newPartitionMap() *partitionMap {
 	}
 }
 
+func (m *partitionMap) IsSubscribedTo(topic string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for tp := range m.data {
+		if tp.Topic == topic {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *partitionMap) Fetch(topic string, partition int32) *partitionConsumer {
 	m.mu.RLock()
 	pc, _ := m.data[topicPartition{topic, partition}]
@@ -149,18 +163,6 @@ func (m *partitionMap) Store(topic string, partition int32, pc *partitionConsume
 	m.mu.Lock()
 	m.data[topicPartition{topic, partition}] = pc
 	m.mu.Unlock()
-}
-
-func (m *partitionMap) HasDirty() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, pc := range m.data {
-		if state := pc.State(); state.Dirty {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *partitionMap) Snapshot() map[topicPartition]partitionState {

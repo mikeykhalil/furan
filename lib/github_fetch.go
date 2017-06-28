@@ -2,8 +2,8 @@ package lib
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -46,7 +46,9 @@ func NewGitHubFetcher(token string) *GitHubFetcher {
 
 // GetCommitSHA returns the commit SHA for a reference
 func (gf *GitHubFetcher) GetCommitSHA(owner string, repo string, ref string) (string, error) {
-	csha, _, err := gf.c.Repositories.GetCommitSHA1(owner, repo, ref, "")
+	ctx, cf := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	defer cf()
+	csha, _, err := gf.c.Repositories.GetCommitSHA1(ctx, owner, repo, ref, "")
 	return csha, err
 }
 
@@ -56,9 +58,17 @@ func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.
 	opt := &github.RepositoryContentGetOptions{
 		Ref: ref,
 	}
-	url, _, err := gf.c.Repositories.GetArchiveLink(owner, repo, github.Tarball, opt)
+	ctx, cf := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	defer cf()
+	url, resp, err := gf.c.Repositories.GetArchiveLink(ctx, owner, repo, github.Tarball, opt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting archive link: %v", err)
+	}
+	if resp.StatusCode > 399 {
+		return nil, fmt.Errorf("error status when getting archive link: %v", resp.Status)
+	}
+	if url == nil {
+		return nil, fmt.Errorf("url is nil")
 	}
 	return gf.getArchive(url)
 }
@@ -75,10 +85,13 @@ func (gf *GitHubFetcher) getArchive(archiveURL *url.URL) (io.Reader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error performing archive http request: %v", err)
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("error getting archive: response is nil")
+	}
 	if resp.StatusCode > 299 {
 		return nil, fmt.Errorf("archive http request failed: %v", resp.StatusCode)
 	}
-	return gf.stripTarPrefix(resp.Body)
+	return newTarPrefixStripper(resp.Body), nil
 }
 
 func (gf *GitHubFetcher) debugWriteTar(contents []byte) {
@@ -91,55 +104,98 @@ func (gf *GitHubFetcher) debugWriteTar(contents []byte) {
 	}
 }
 
-// Files within GitHub archives are prefixed with a random path, so we have to
-// strip that prefix to get an archive suitable for a Docker build context.
-// Note that we do not compress the output tar archive since we assume callers
-// will be passing it to the Docker engine running on localhost
-func (gf *GitHubFetcher) stripTarPrefix(input io.ReadCloser) (io.Reader, error) {
-	defer input.Close()
-	gzr, err := gzip.NewReader(input)
-	if err != nil {
-		return nil, fmt.Errorf("error creating gzip reader: %v", err)
+// tarPrefixStripper removes a random path that Github prefixes its
+// archives with.
+type tarPrefixStripper struct {
+	tarball          io.ReadCloser
+	pipeReader       *io.PipeReader
+	pipeWriter       *io.PipeWriter
+	strippingStarted bool
+}
+
+func newTarPrefixStripper(tarball io.ReadCloser) io.Reader {
+	reader, writer := io.Pipe()
+	return &tarPrefixStripper{
+		tarball:    tarball,
+		pipeReader: reader,
+		pipeWriter: writer,
 	}
-	defer gzr.Close()
-	output := bytes.NewBuffer(nil)
-	intar := tar.NewReader(gzr)
-	outtar := tar.NewWriter(output)
-	defer outtar.Close()
-	var contents []byte
+}
+
+func (t *tarPrefixStripper) Read(p []byte) (n int, err error) {
+	if !t.strippingStarted {
+		go t.startStrippingPipe()
+		t.strippingStarted = true
+	}
+	return t.pipeReader.Read(p)
+}
+
+func (t *tarPrefixStripper) processHeader(h *tar.Header) (bool, error) {
+	// metadata file, ignore
+	if h.Name == "pax_global_header" {
+		return true, nil
+	}
+	if path.IsAbs(h.Name) {
+		return true, fmt.Errorf("archive contains absolute path: %v", h.Name)
+	}
+
+	// top-level directory entry
+	spath := strings.Split(h.Name, "/")
+	if len(spath) == 2 && spath[1] == "" {
+		return true, nil
+	}
+	h.Name = strings.Join(spath[1:len(spath)], "/")
+
+	return false, nil
+}
+
+func (t *tarPrefixStripper) startStrippingPipe() {
+	gzr, err := gzip.NewReader(t.tarball)
+	if err != nil {
+		t.pipeWriter.CloseWithError(err)
+		return
+	}
+
+	tarball := tar.NewReader(gzr)
+	outTarball := tar.NewWriter(t.pipeWriter)
+
+	closeFunc := func(e error) {
+		outTarball.Close()
+		t.pipeWriter.CloseWithError(e)
+		t.tarball.Close()
+	}
+
 	for {
-		h, err := intar.Next()
-		if err != nil {
-			if err == io.EOF {
-				return output, nil
-			}
-			return nil, fmt.Errorf("error reading input tar entry: %v", err)
+		header, err := tarball.Next()
+		if err == io.EOF {
+			closeFunc(nil)
+			return
 		}
-		if h.Name == "pax_global_header" { // metadata file, ignore
+		if err != nil {
+			closeFunc(err)
+			return
+		}
+
+		skip, err := t.processHeader(header)
+		if err != nil {
+			closeFunc(err)
+			return
+		}
+		if skip {
 			continue
 		}
-		if path.IsAbs(h.Name) {
-			return nil, fmt.Errorf("archive contains absolute path: %v", h.Name)
+
+		if err := outTarball.WriteHeader(header); err != nil {
+			closeFunc(err)
+			return
 		}
-		spath := strings.Split(h.Name, "/")
-		if len(spath) == 2 && spath[1] == "" { // top-level directory entry
-			continue
+		if _, err := io.Copy(outTarball, tarball); err != nil {
+			closeFunc(err)
+			return
 		}
-		h.Name = strings.Join(spath[1:len(spath)], "/")
-		err = outtar.WriteHeader(h)
-		if err != nil {
-			return nil, fmt.Errorf("error writing output tar header: %v", err)
-		}
-		contents, err = ioutil.ReadAll(intar)
-		if err != nil {
-			return nil, fmt.Errorf("error reading input tar contents: %v", err)
-		}
-		if int64(len(contents)) != h.Size {
-			log.Printf("%v: size mismatch: read %v (size: %v)", h.Name, len(contents), h.Size)
-		}
-		_, err = outtar.Write(contents)
-		if err != nil {
-			return nil, fmt.Errorf("error writing output tar contents: %v", err)
+		if err := outTarball.Flush(); err != nil {
+			closeFunc(err)
+			return
 		}
 	}
 }

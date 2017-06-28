@@ -25,6 +25,21 @@ func (c *TokenAuth) Create(opts *TokenCreateRequest) (*Secret, error) {
 	return ParseSecret(resp.Body)
 }
 
+func (c *TokenAuth) CreateOrphan(opts *TokenCreateRequest) (*Secret, error) {
+	r := c.c.NewRequest("POST", "/v1/auth/token/create-orphan")
+	if err := r.SetJSONBody(opts); err != nil {
+		return nil, err
+	}
+
+	resp, err := c.c.RawRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ParseSecret(resp.Body)
+}
+
 func (c *TokenAuth) CreateWithRole(opts *TokenCreateRequest, roleName string) (*Secret, error) {
 	r := c.c.NewRequest("POST", "/v1/auth/token/create/"+roleName)
 	if err := r.SetJSONBody(opts); err != nil {
@@ -157,8 +172,10 @@ func (c *TokenAuth) RevokeOrphan(token string) error {
 	return nil
 }
 
-// RevokeSelf revokes the token making the call
-func (c *TokenAuth) RevokeSelf() error {
+// RevokeSelf revokes the token making the call. The `token` parameter is kept
+// for backwards compatibility but is ignored; only the client's set token has
+// an effect.
+func (c *TokenAuth) RevokeSelf(token string) error {
 	r := c.c.NewRequest("PUT", "/v1/auth/token/revoke-self")
 	resp, err := c.c.RawRequest(r)
 	if err != nil {

@@ -31,6 +31,12 @@ Dependencies and how to run Furan are best documented in ``docker-compose.yml``.
 
 The Docker Compose setup will spin up and initialize all dependencies and then bring up Furan.
 
+For builds and pushes to work with docker-compose, edit `local_dev_secrets.json` to include:
+
+- GitHub token (for fetching repositories)
+- dockercfg (for pushing to remote docker registries)
+- AWS access key ID and secret key (for pushing failed build logs to an S3 bucket)
+
 Production Examples
 -------------------
 

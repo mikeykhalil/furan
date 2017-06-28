@@ -40,11 +40,13 @@ services:
       - DOCKER_TLS_VERIFY
       - DOCKER_CERT_PATH=/opt/docker-certs
     # delay startup to wait for other services to be ready and for network links to come up
-    command: /bin/sh -c 'echo "starting (delay)" && sleep 20 && /go/bin/furan -k -i -n scylla -f kafka:9092 server --log-to-sumo=false'
+    command: /dc-run.sh
     ports:
       - "4000:4000"
       - "4001:4001"
       - "4002:4002"
+    ulimits:
+      nofile: 65535
     depends_on:
       - kafka
       - scylla

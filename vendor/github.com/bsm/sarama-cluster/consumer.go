@@ -20,7 +20,9 @@ type Consumer struct {
 	generationID int32
 	groupID      string
 	memberID     string
-	topics       []string
+
+	coreTopics  []string
+	extraTopics []string
 
 	dying, dead chan none
 
@@ -39,14 +41,14 @@ func NewConsumerFromClient(client *Client, groupID string, topics []string) (*Co
 		return nil, err
 	}
 
+	sort.Strings(topics)
 	c := &Consumer{
-		client: client,
-
-		csmr: csmr,
-		subs: newPartitionMap(),
-
+		client:  client,
+		csmr:    csmr,
+		subs:    newPartitionMap(),
 		groupID: groupID,
-		topics:  topics,
+
+		coreTopics: topics,
 
 		dying: make(chan none),
 		dead:  make(chan none),
@@ -91,8 +93,12 @@ func (c *Consumer) Errors() <-chan error { return c.errors }
 
 // Notifications returns a channel of Notifications that occur during consumer
 // rebalancing. Notifications will only be emitted over this channel, if your config's
-// Cluster.Return.Notifications setting to true.
+// Group.Return.Notifications setting to true.
 func (c *Consumer) Notifications() <-chan *Notification { return c.notifications }
+
+// HighWaterMarks returns the current high water marks for each topic and partition
+// Consistency between partitions is not guaranteed since high water marks are updated separately.
+func (c *Consumer) HighWaterMarks() map[string]map[int32]int64 { return c.csmr.HighWaterMarks() }
 
 // MarkOffset marks the provided message as processed, alongside a metadata string
 // that represents the state of the partition consumer at that point in time. The
@@ -113,12 +119,24 @@ func (c *Consumer) MarkPartitionOffset(topic string, partition int32, offset int
 	c.subs.Fetch(topic, partition).MarkOffset(offset+1, metadata)
 }
 
+// MarkOffsets marks stashed offsets as processed.
+// See MarkOffset for additional explanation.
+func (c *Consumer) MarkOffsets(s *OffsetStash) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for tp, info := range s.offsets {
+		c.subs.Fetch(tp.Topic, tp.Partition).MarkOffset(info.Offset+1, info.Metadata)
+		delete(s.offsets, tp)
+	}
+}
+
 // Subscriptions returns the consumed topics and partitions
 func (c *Consumer) Subscriptions() map[string][]int32 {
 	return c.subs.Info()
 }
 
-// CommitOffsets manually commits marked offsets
+// CommitOffsets manually commits marked offsets.
 func (c *Consumer) CommitOffsets() error {
 	c.commitMu.Lock()
 	defer c.commitMu.Unlock()
@@ -131,16 +149,16 @@ func (c *Consumer) CommitOffsets() error {
 		RetentionTime:           -1,
 	}
 
-	if rt := c.client.config.Consumer.Offsets.Retention; rt != 0 {
-		req.RetentionTime = int64(rt / time.Millisecond)
+	if ns := c.client.config.Consumer.Offsets.Retention; ns != 0 {
+		req.RetentionTime = int64(ns / time.Millisecond)
 	}
 
-	var dirty bool
 	snap := c.subs.Snapshot()
+	dirty := false
 	for tp, state := range snap {
 		if state.Dirty {
-			req.AddBlock(tp.Topic, tp.Partition, state.Info.Offset, 0, state.Info.Metadata)
 			dirty = true
+			req.AddBlock(tp.Topic, tp.Partition, state.Info.Offset, 0, state.Info.Metadata)
 		}
 	}
 	if !dirty {
@@ -159,8 +177,8 @@ func (c *Consumer) CommitOffsets() error {
 		return err
 	}
 
-	for topic, perrs := range resp.Errors {
-		for partition, kerr := range perrs {
+	for topic, errs := range resp.Errors {
+		for partition, kerr := range errs {
 			if kerr != sarama.ErrNoError {
 				err = kerr
 			} else if state, ok := snap[topicPartition{topic, partition}]; ok {
@@ -168,13 +186,17 @@ func (c *Consumer) CommitOffsets() error {
 			}
 		}
 	}
-
 	return err
 }
 
 // Close safely closes the consumer and releases all resources
 func (c *Consumer) Close() (err error) {
-	close(c.dying)
+	select {
+	case <-c.dying:
+		return
+	default:
+		close(c.dying)
+	}
 	<-c.dead
 
 	if e := c.release(); e != nil {
@@ -239,7 +261,11 @@ func (c *Consumer) mainLoop() {
 			continue
 		}
 
-		// Start consuming and comitting offsets
+		// Start topic watcher loop
+		twStop, twDone := make(chan none), make(chan none)
+		go c.twLoop(twStop, twDone)
+
+		// Start consuming and committing offsets
 		cmStop, cmDone := make(chan none), make(chan none)
 		go c.cmLoop(cmStop, cmDone)
 		atomic.StoreInt32(&c.consuming, 1)
@@ -254,14 +280,25 @@ func (c *Consumer) mainLoop() {
 		select {
 		case <-hbDone:
 			close(cmStop)
+			close(twStop)
 			<-cmDone
-		case <-cmDone:
+			<-twDone
+		case <-twDone:
+			close(cmStop)
 			close(hbStop)
+			<-cmDone
+			<-hbDone
+		case <-cmDone:
+			close(twStop)
+			close(hbStop)
+			<-twDone
 			<-hbDone
 		case <-c.dying:
 			close(cmStop)
-			<-cmDone
+			close(twStop)
 			close(hbStop)
+			<-cmDone
+			<-twDone
 			<-hbDone
 			return
 		}
@@ -285,6 +322,35 @@ func (c *Consumer) hbLoop(stop <-chan none, done chan<- none) {
 			default:
 				c.handleError(&Error{Ctx: "heartbeat", error: err})
 				return
+			}
+		case <-stop:
+			return
+		}
+	}
+}
+
+// topic watcher loop, triggered by the mainLoop
+func (c *Consumer) twLoop(stop <-chan none, done chan<- none) {
+	defer close(done)
+
+	ticker := time.NewTicker(c.client.config.Metadata.RefreshFrequency / 2)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			topics, err := c.client.Topics()
+			if err != nil {
+				c.handleError(&Error{Ctx: "topics", error: err})
+				return
+			}
+
+			for _, topic := range topics {
+				if !c.isKnownCoreTopic(topic) &&
+					!c.isKnownExtraTopic(topic) &&
+					c.isPotentialExtraTopic(topic) {
+					return
+				}
 			}
 		case <-stop:
 			return
@@ -386,9 +452,20 @@ func (c *Consumer) heartbeat() error {
 func (c *Consumer) rebalance() (map[string][]int32, error) {
 	sarama.Logger.Printf("cluster/consumer %s rebalance\n", c.memberID)
 
+	if err := c.refreshMetadata(); err != nil {
+		return nil, err
+	}
+
 	if err := c.client.RefreshCoordinator(c.groupID); err != nil {
 		return nil, err
 	}
+
+	allTopics, err := c.client.Topics()
+	if err != nil {
+		return nil, err
+	}
+	c.extraTopics = c.selectExtraTopics(allTopics)
+	sort.Strings(c.extraTopics)
 
 	// Release subscriptions
 	if err := c.release(); err != nil {
@@ -467,8 +544,9 @@ func (c *Consumer) joinGroup() (*balancer, error) {
 	}
 
 	meta := &sarama.ConsumerGroupMemberMetadata{
-		Version: 1,
-		Topics:  c.topics,
+		Version:  1,
+		Topics:   append(c.coreTopics, c.extraTopics...),
+		UserData: c.client.config.Group.Member.UserData,
 	}
 	err := req.AddGroupProtocolMetadata(string(StrategyRange), meta)
 	if err != nil {
@@ -637,7 +715,7 @@ func (c *Consumer) createConsumer(topic string, partition int32, info offsetInfo
 	// Create partitionConsumer
 	pc, err := newPartitionConsumer(c.csmr, topic, partition, info, c.client.config.Consumer.Offsets.Initial)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	// Store in subscriptions
@@ -651,7 +729,7 @@ func (c *Consumer) createConsumer(topic string, partition int32, info offsetInfo
 
 func (c *Consumer) commitOffsetsWithRetry(retries int) error {
 	err := c.CommitOffsets()
-	if err != nil && retries > 0 && c.subs.HasDirty() {
+	if err != nil && retries > 0 {
 		return c.commitOffsetsWithRetry(retries - 1)
 	}
 	return err
@@ -666,4 +744,44 @@ func (c *Consumer) closeCoordinator(broker *sarama.Broker, err error) {
 	case sarama.ErrConsumerCoordinatorNotAvailable, sarama.ErrNotCoordinatorForConsumer:
 		_ = c.client.RefreshCoordinator(c.groupID)
 	}
+}
+
+func (c *Consumer) selectExtraTopics(allTopics []string) []string {
+	extra := allTopics[:0]
+	for _, topic := range allTopics {
+		if !c.isKnownCoreTopic(topic) && c.isPotentialExtraTopic(topic) {
+			extra = append(extra, topic)
+		}
+	}
+	return extra
+}
+
+func (c *Consumer) isKnownCoreTopic(topic string) bool {
+	pos := sort.SearchStrings(c.coreTopics, topic)
+	return pos < len(c.coreTopics) && c.coreTopics[pos] == topic
+}
+
+func (c *Consumer) isKnownExtraTopic(topic string) bool {
+	pos := sort.SearchStrings(c.extraTopics, topic)
+	return pos < len(c.extraTopics) && c.extraTopics[pos] == topic
+}
+
+func (c *Consumer) isPotentialExtraTopic(topic string) bool {
+	rx := c.client.config.Group.Topics
+	if rx.Blacklist != nil && rx.Blacklist.MatchString(topic) {
+		return false
+	}
+	if rx.Whitelist != nil && rx.Whitelist.MatchString(topic) {
+		return true
+	}
+	return false
+}
+
+func (c *Consumer) refreshMetadata() error {
+	err := c.client.RefreshMetadata()
+	if err == sarama.ErrTopicAuthorizationFailed {
+		// maybe we didn't have authorization to describe all topics
+		err = c.client.RefreshMetadata(c.coreTopics...)
+	}
+	return err
 }
