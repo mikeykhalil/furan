@@ -33,7 +33,7 @@
 
 // Package codes defines the canonical error codes used by gRPC. It is
 // consistent across various languages.
-package codes
+package codes // import "google.golang.org/grpc/codes"
 
 // A Code is an unsigned 32-bit error code as defined in the gRPC spec.
 type Code uint32
@@ -44,7 +44,7 @@ const (
 	// OK is returned on success.
 	OK Code = 0
 
-	// Canceled indicates the operation was cancelled (typically by the caller).
+	// Canceled indicates the operation was canceled (typically by the caller).
 	Canceled Code = 1
 
 	// Unknown error.  An example of where this error may be returned is
