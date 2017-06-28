@@ -3,6 +3,7 @@ package lib
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -45,7 +46,9 @@ func NewGitHubFetcher(token string) *GitHubFetcher {
 
 // GetCommitSHA returns the commit SHA for a reference
 func (gf *GitHubFetcher) GetCommitSHA(owner string, repo string, ref string) (string, error) {
-	csha, _, err := gf.c.Repositories.GetCommitSHA1(owner, repo, ref, "")
+	ctx, cf := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	defer cf()
+	csha, _, err := gf.c.Repositories.GetCommitSHA1(ctx, owner, repo, ref, "")
 	return csha, err
 }
 
@@ -55,7 +58,9 @@ func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.
 	opt := &github.RepositoryContentGetOptions{
 		Ref: ref,
 	}
-	url, resp, err := gf.c.Repositories.GetArchiveLink(owner, repo, github.Tarball, opt)
+	ctx, cf := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	defer cf()
+	url, resp, err := gf.c.Repositories.GetArchiveLink(ctx, owner, repo, github.Tarball, opt)
 	if err != nil {
 		return nil, fmt.Errorf("error getting archive link: %v", err)
 	}
