@@ -28,7 +28,7 @@ func (q *queryExecutor) executeQuery(qry ExecutableQuery) (*Iter, error) {
 			continue
 		}
 
-		pool, ok := q.pool.getPool(host.Peer())
+		pool, ok := q.pool.getPool(host)
 		if !ok {
 			continue
 		}
@@ -48,6 +48,7 @@ func (q *queryExecutor) executeQuery(qry ExecutableQuery) (*Iter, error) {
 
 		// Exit for loop if the query was successful
 		if iter.err == nil {
+			iter.host = host
 			return iter, nil
 		}
 

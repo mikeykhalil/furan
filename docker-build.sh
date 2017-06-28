@@ -10,7 +10,6 @@ wget -O /bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.
 chmod +x /bin/dumb-init
 cp /go/src/github.com/dollarshaveclub/furan/dc-run.sh /dc-run.sh
 chmod a+x /dc-run.sh
-apk del ca-certificates wget
 
 go get -v || exit 1
 go build || exit 1

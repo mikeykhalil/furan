@@ -214,7 +214,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	ib.logf(ctx, "starting build")
 	err := ib.dl.SetBuildTimeMetric(id, "docker_build_started")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error setting build time metric in DB: %v", err)
 	}
 	rl := strings.Split(req.Build.GithubRepo, "/")
 	if len(rl) != 2 {
@@ -228,7 +228,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	ib.logf(ctx, "fetching github repo: %v", req.Build.GithubRepo)
 	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error fetching repo: %v", err)
 	}
 	var dp string
 	if req.Build.DockerfilePath == "" {
@@ -238,7 +238,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	}
 	inames, err := ib.getFullImageNames(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error getting full image names: %v", err)
 	}
 	ib.logf(ctx, "tags: %v", inames)
 	rbi := &RepoBuildData{

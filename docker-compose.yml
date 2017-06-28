@@ -45,6 +45,8 @@ services:
       - "4000:4000"
       - "4001:4001"
       - "4002:4002"
+    ulimits:
+      nofile: 65535
     depends_on:
       - kafka
       - scylla

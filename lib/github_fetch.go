@@ -3,6 +3,7 @@ package lib
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -45,7 +46,9 @@ func NewGitHubFetcher(token string) *GitHubFetcher {
 
 // GetCommitSHA returns the commit SHA for a reference
 func (gf *GitHubFetcher) GetCommitSHA(owner string, repo string, ref string) (string, error) {
-	csha, _, err := gf.c.Repositories.GetCommitSHA1(owner, repo, ref, "")
+	ctx, cf := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	defer cf()
+	csha, _, err := gf.c.Repositories.GetCommitSHA1(ctx, owner, repo, ref, "")
 	return csha, err
 }
 
@@ -55,9 +58,17 @@ func (gf *GitHubFetcher) Get(owner string, repo string, ref string) (tarball io.
 	opt := &github.RepositoryContentGetOptions{
 		Ref: ref,
 	}
-	url, _, err := gf.c.Repositories.GetArchiveLink(owner, repo, github.Tarball, opt)
+	ctx, cf := context.WithTimeout(context.Background(), githubDownloadTimeoutSecs*time.Second)
+	defer cf()
+	url, resp, err := gf.c.Repositories.GetArchiveLink(ctx, owner, repo, github.Tarball, opt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting archive link: %v", err)
+	}
+	if resp.StatusCode > 399 {
+		return nil, fmt.Errorf("error status when getting archive link: %v", resp.Status)
+	}
+	if url == nil {
+		return nil, fmt.Errorf("url is nil")
 	}
 	return gf.getArchive(url)
 }
@@ -74,10 +85,12 @@ func (gf *GitHubFetcher) getArchive(archiveURL *url.URL) (io.Reader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error performing archive http request: %v", err)
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("error getting archive: response is nil")
+	}
 	if resp.StatusCode > 299 {
 		return nil, fmt.Errorf("archive http request failed: %v", resp.StatusCode)
 	}
-
 	return newTarPrefixStripper(resp.Body), nil
 }
 
