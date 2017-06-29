@@ -134,13 +134,14 @@ func server(cmd *cobra.Command, args []string) {
 	gf := lib.NewGitHubFetcher(gitConfig.Token)
 	osm := lib.NewS3StorageManager(awsConfig, mc, logger)
 	is := lib.NewDockerImageSquasher(logger)
+	itc := lib.NewRegistryTagChecker(&dockerConfig, logger.Printf)
 	s3errcfg := lib.S3ErrorLogConfig{
 		PushToS3:          serverConfig.S3ErrorLogs,
 		Region:            serverConfig.S3ErrorLogRegion,
 		Bucket:            serverConfig.S3ErrorLogBucket,
 		PresignTTLMinutes: serverConfig.S3PresignTTL,
 	}
-	imageBuilder, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, dockerConfig.DockercfgContents, s3errcfg, logger)
+	imageBuilder, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, itc, dockerConfig.DockercfgContents, s3errcfg, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}

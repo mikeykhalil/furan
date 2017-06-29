@@ -82,13 +82,14 @@ type ImageBuilder struct {
 	mc         MetricsCollector
 	is         ImageSquasher
 	osm        ObjectStorageManger
+	itc        ImageTagChecker
 	dockercfg  map[string]dtypes.AuthConfig
 	s3errorcfg S3ErrorLogConfig
 	logger     *log.Logger
 }
 
 // NewImageBuilder returns a new ImageBuilder
-func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, osm ObjectStorageManger, is ImageSquasher, dcfg map[string]dtypes.AuthConfig, s3errorcfg S3ErrorLogConfig, logger *log.Logger) (*ImageBuilder, error) {
+func NewImageBuilder(eventbus EventBusProducer, datalayer DataLayer, gf CodeFetcher, dc ImageBuildClient, mc MetricsCollector, osm ObjectStorageManger, is ImageSquasher, itc ImageTagChecker, dcfg map[string]dtypes.AuthConfig, s3errorcfg S3ErrorLogConfig, logger *log.Logger) (*ImageBuilder, error) {
 	ib := &ImageBuilder{}
 	ib.gf = gf
 	ib.c = dc
@@ -209,6 +210,45 @@ func (ib *ImageBuilder) getFullImageNames(req *BuildRequest) ([]string, error) {
 	return names, nil
 }
 
+// tagCheck checks the existance of tags in the registry or the S3 object
+// returns true if build/push should be performed
+func (ib *ImageBuilder) tagCheck(req *BuildRequest) (bool, error) {
+	if !req.Build.SkipIfExists {
+		return true, nil
+	}
+	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+	if err != nil {
+		return false, fmt.Errorf("error getting latest commit SHA: %v", err)
+	}
+	s3 := req.Push.Registry.Repo == ""
+	if s3 {
+		desc := ImageDescription{
+			GitHubRepo: req.Build.GithubRepo,
+			CommitSHA:  csha,
+		}
+		opts := S3Options{
+			Region:    req.Push.S3.Region,
+			Bucket:    req.Push.S3.Bucket,
+			KeyPrefix: req.Push.S3.KeyPrefix,
+		}
+		ok, err := ib.osm.Exists(desc, &opts)
+		if err != nil {
+			return false, fmt.Errorf("error checking if S3 object exists: %v", err)
+		}
+		return ok, nil
+	}
+	tags := make([]string, len(req.Build.Tags))
+	copy(tags, req.Build.Tags)
+	if req.Build.TagWithCommitSha {
+		tags = append(tags, csha)
+	}
+	ok, _, err := ib.itc.AllTagsExist(tags, req.Push.Registry.Repo)
+	if err != nil {
+		return false, fmt.Errorf("error checking if tags exist: %v", err)
+	}
+	return ok, nil
+}
+
 // Build builds an image accourding to the request
 func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.UUID) (string, error) {
 	ib.logf(ctx, "starting build")
@@ -219,6 +259,13 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *BuildRequest, id gocql.U
 	rl := strings.Split(req.Build.GithubRepo, "/")
 	if len(rl) != 2 {
 		return "", fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
+	}
+	ok, err := ib.tagCheck(req)
+	if err != nil {
+		return "", fmt.Errorf("error checking if tags/object exist: %v", err)
+	}
+	if !ok {
+		return "", fmt.Errorf("build not necessary: tags or object exist")
 	}
 	owner := rl[0]
 	repo := rl[1]

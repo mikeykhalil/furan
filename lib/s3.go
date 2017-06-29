@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -29,6 +30,7 @@ type ObjectStorageManger interface {
 	Push(ImageDescription, io.Reader, interface{}) error
 	Pull(ImageDescription, io.WriterAt, interface{}) error
 	Size(ImageDescription, interface{}) (int64, error)
+	Exists(desc ImageDescription, opts interface{}) (bool, error)
 	WriteFile(string, ImageDescription, string, io.Reader, interface{}) (string, error)
 }
 
@@ -126,12 +128,23 @@ func GenerateS3KeyName(keypfx string, repo string, commitsha string) string {
 	return fmt.Sprintf("%v%v/%v.tar.gz", keypfx, repo, commitsha)
 }
 
-// Size returns the size in bytes of the object in S3 if found or error
-func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64, error) {
+// Exists checks whether the image tarball exists in S3
+func (sm *S3StorageManager) Exists(desc ImageDescription, opts interface{}) (bool, error) {
 	s3opts, err := sm.getOpts(opts)
 	if err != nil {
-		return 0, err
+		return false, fmt.Errorf("error getting opts: %v", err)
 	}
+	_, err = sm.getS3Object(s3opts, desc)
+	if err != nil {
+		if strings.Contains(err.Error(), "error listing objects") {
+			return false, nil
+		}
+		return false, fmt.Errorf("error getting S3 object: %v", err)
+	}
+	return true, nil
+}
+
+func (sm *S3StorageManager) getS3Object(s3opts *S3Options, desc ImageDescription) (*s3.Object, error) {
 	sess := sm.getSession(s3opts.Region)
 	c := s3.New(sess)
 
@@ -143,12 +156,25 @@ func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64
 	}
 	resp, err := c.ListObjectsV2(in)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("error listing objects: %v", err)
 	}
 	if len(resp.Contents) != 1 {
-		return 0, fmt.Errorf("unexpected response length from S3 API: %v (%v)", len(resp.Contents), resp.Contents)
+		return nil, fmt.Errorf("unexpected response length from S3 API: %v (%v)", len(resp.Contents), resp.Contents)
 	}
-	sz := resp.Contents[0].Size
+	return resp.Contents[0], nil
+}
+
+// Size returns the size in bytes of the object in S3 if found or error
+func (sm *S3StorageManager) Size(desc ImageDescription, opts interface{}) (int64, error) {
+	s3opts, err := sm.getOpts(opts)
+	if err != nil {
+		return 0, fmt.Errorf("error getting opts: %v", err)
+	}
+	obj, err := sm.getS3Object(s3opts, desc)
+	if err != nil {
+		return 0, fmt.Errorf("error getting S3 object: %v", err)
+	}
+	sz := obj.Size
 	if sz == nil {
 		return 0, fmt.Errorf("sz is nil")
 	}

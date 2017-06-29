@@ -119,13 +119,14 @@ func build(cmd *cobra.Command, args []string) {
 
 	osm := lib.NewS3StorageManager(awsConfig, mc, clogger)
 	is := lib.NewDockerImageSquasher(clogger)
+	itc := lib.NewRegistryTagChecker(&dockerConfig, logger.Printf)
 	s3errcfg := lib.S3ErrorLogConfig{
 		PushToS3:          buildS3ErrorLogs,
 		Region:            buildS3ErrorLogRegion,
 		Bucket:            buildS3ErrorLogBucket,
 		PresignTTLMinutes: buildS3ErrorLogsPresignTTL,
 	}
-	ib, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, dockerConfig.DockercfgContents, s3errcfg, logger)
+	ib, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, itc, dockerConfig.DockercfgContents, s3errcfg, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}

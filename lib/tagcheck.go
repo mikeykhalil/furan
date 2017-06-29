@@ -11,6 +11,7 @@ import (
 
 // ImageTagChecker describes an object that can see if a tag exists for an image in a registry
 type ImageTagChecker interface {
+	AllTagsExist(tags []string, repo string) (bool, []string, error)
 }
 
 // RegistryTagChecker is an object that can check a remote registry for a set of tags
