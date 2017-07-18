@@ -9,19 +9,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dollarshaveclub/furan/lib"
+	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/lib/config"
+	"github.com/dollarshaveclub/furan/lib/datalayer"
+	"github.com/dollarshaveclub/furan/lib/db"
+	"github.com/dollarshaveclub/furan/lib/kafka"
+	"github.com/dollarshaveclub/furan/lib/metrics"
 	"github.com/dollarshaveclub/go-lib/cassandra"
 	"github.com/gocql/gocql"
 	consul "github.com/hashicorp/consul/api"
 	"github.com/spf13/cobra"
 )
 
-var vaultConfig lib.Vaultconfig
-var gitConfig lib.Gitconfig
-var dockerConfig lib.Dockerconfig
-var awsConfig lib.AWSConfig
-var dbConfig lib.DBconfig
-var kafkaConfig lib.Kafkaconfig
+var vaultConfig config.Vaultconfig
+var gitConfig config.Gitconfig
+var dockerConfig config.Dockerconfig
+var awsConfig config.AWSConfig
+var dbConfig config.DBconfig
+var kafkaConfig config.Kafkaconfig
 
 var nodestr string
 var datacenterstr string
@@ -33,11 +38,11 @@ var dogstatsdAddr string
 var logger *log.Logger
 
 // used by build and trigger commands
-var cliBuildRequest = lib.BuildRequest{
-	Build: &lib.BuildDefinition{},
-	Push: &lib.PushDefinition{
-		Registry: &lib.PushRegistryDefinition{},
-		S3:       &lib.PushS3Definition{},
+var cliBuildRequest = pb.BuildRequest{
+	Build: &pb.BuildDefinition{},
+	Push: &pb.PushDefinition{
+		Registry: &pb.PushRegistryDefinition{},
+		S3:       &pb.PushS3Definition{},
 	},
 }
 var tags string
@@ -154,15 +159,15 @@ func setupDataLayer() {
 	if err != nil {
 		log.Fatalf("error creating DB session: %v", err)
 	}
-	dbConfig.Datalayer = lib.NewDBLayer(s)
+	dbConfig.Datalayer = datalayer.NewDBLayer(s)
 }
 
 func initDB() {
-	err := cassandra.CreateRequiredTypes(dbConfig.Cluster, lib.RequiredUDTs)
+	err := cassandra.CreateRequiredTypes(dbConfig.Cluster, db.RequiredUDTs)
 	if err != nil {
 		log.Fatalf("error creating UDTs: %v", err)
 	}
-	err = cassandra.CreateRequiredTables(dbConfig.Cluster, lib.RequiredTables)
+	err = cassandra.CreateRequiredTables(dbConfig.Cluster, db.RequiredTables)
 	if err != nil {
 		log.Fatalf("error creating tables: %v", err)
 	}
@@ -184,7 +189,7 @@ func setupDB(initdb bool) {
 	setupDataLayer()
 }
 
-func setupKafka(mc lib.MetricsCollector) {
+func setupKafka(mc metrics.MetricsCollector) {
 	kafkaConfig.Brokers = strings.Split(kafkaBrokerStr, ",")
 	if len(kafkaConfig.Brokers) < 1 {
 		log.Fatalf("At least one Kafka broker is required")
@@ -192,7 +197,7 @@ func setupKafka(mc lib.MetricsCollector) {
 	if kafkaConfig.Topic == "" {
 		log.Fatalf("Kafka topic is required")
 	}
-	kp, err := lib.NewKafkaManager(kafkaConfig.Brokers, kafkaConfig.Topic, kafkaConfig.MaxOpenSends, mc, logger)
+	kp, err := kafka.NewKafkaManager(kafkaConfig.Brokers, kafkaConfig.Topic, kafkaConfig.MaxOpenSends, mc, logger)
 	if err != nil {
 		log.Fatalf("Error creating Kafka producer: %v", err)
 	}

@@ -22,7 +22,7 @@ It has these top-level messages:
 	BuildEventError
 	BuildEvent
 */
-package rpcclient
+package pb
 
 import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"

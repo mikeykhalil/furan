@@ -8,7 +8,16 @@ import (
 	"strings"
 
 	docker "github.com/docker/engine-api/client"
-	"github.com/dollarshaveclub/furan/lib"
+	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/lib/builder"
+	"github.com/dollarshaveclub/furan/lib/github_fetch"
+	"github.com/dollarshaveclub/furan/lib/grpc"
+	"github.com/dollarshaveclub/furan/lib/metrics"
+	"github.com/dollarshaveclub/furan/lib/s3"
+	"github.com/dollarshaveclub/furan/lib/squasher"
+	"github.com/dollarshaveclub/furan/lib/stream_adapter"
+	"github.com/dollarshaveclub/furan/lib/tagcheck"
+	"github.com/dollarshaveclub/furan/lib/vault"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 )
@@ -89,7 +98,7 @@ func build(cmd *cobra.Command, args []string) {
 	}()
 
 	validateCLIBuildRequest()
-	lib.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+	vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
 	setupDB(initializeDB)
 
 	dnull, err := os.Open(os.DevNull)
@@ -101,7 +110,7 @@ func build(cmd *cobra.Command, args []string) {
 	logger = log.New(dnull, "", log.LstdFlags)
 	clogger := log.New(os.Stderr, "", log.LstdFlags)
 
-	mc, err := lib.NewDatadogCollector(dogstatsdAddr)
+	mc, err := metrics.NewDatadogCollector(dogstatsdAddr)
 	if err != nil {
 		log.Fatalf("error creating Datadog collector: %v", err)
 	}
@@ -111,29 +120,29 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("Error getting dockercfg: %v", err)
 	}
 
-	gf := lib.NewGitHubFetcher(gitConfig.Token)
+	gf := githubfetch.NewGitHubFetcher(gitConfig.Token)
 	dc, err := docker.NewEnvClient()
 	if err != nil {
 		clierr("error creating Docker client: %v", err)
 	}
 
-	osm := lib.NewS3StorageManager(awsConfig, mc, clogger)
-	is := lib.NewDockerImageSquasher(clogger)
-	itc := lib.NewRegistryTagChecker(&dockerConfig, logger.Printf)
-	s3errcfg := lib.S3ErrorLogConfig{
+	osm := s3.NewS3StorageManager(awsConfig, mc, clogger)
+	is := squasher.NewDockerImageSquasher(clogger)
+	itc := tagcheck.NewRegistryTagChecker(&dockerConfig, logger.Printf)
+	s3errcfg := builder.S3ErrorLogConfig{
 		PushToS3:          buildS3ErrorLogs,
 		Region:            buildS3ErrorLogRegion,
 		Bucket:            buildS3ErrorLogBucket,
 		PresignTTLMinutes: buildS3ErrorLogsPresignTTL,
 	}
-	ib, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, itc, dockerConfig.DockercfgContents, s3errcfg, logger)
+	ib, err := builder.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, itc, dockerConfig.DockercfgContents, s3errcfg, logger)
 	if err != nil {
 		clierr("error creating image builder: %v", err)
 	}
 
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	gs := lib.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, 1, 1, logger)
+	gs := grpc.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, 1, 1, logger)
 
 	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
 	if err != nil {
@@ -142,11 +151,11 @@ func build(cmd *cobra.Command, args []string) {
 
 	fmt.Fprintf(os.Stdout, "build id: %v\n", resp.BuildId)
 
-	req := &lib.BuildStatusRequest{
+	req := &pb.BuildStatusRequest{
 		BuildId: resp.BuildId,
 	}
 
-	ls := lib.NewLocalServerStream(ctx, os.Stdout)
+	ls := streamadapter.NewLocalServerStream(ctx, os.Stdout)
 	err = gs.MonitorBuild(req, ls)
 	if err != nil {
 		clierr("error monitoring build: %v", err)

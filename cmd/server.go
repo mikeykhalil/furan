@@ -18,12 +18,23 @@ import (
 	_ "net/http/pprof"
 
 	docker "github.com/docker/engine-api/client"
-	"github.com/dollarshaveclub/furan/lib"
+	"github.com/dollarshaveclub/furan/lib/builder"
+	"github.com/dollarshaveclub/furan/lib/config"
+	"github.com/dollarshaveclub/furan/lib/gc"
+	"github.com/dollarshaveclub/furan/lib/github_fetch"
+	"github.com/dollarshaveclub/furan/lib/grpc"
+	"github.com/dollarshaveclub/furan/lib/httphandlers"
+	flogger "github.com/dollarshaveclub/furan/lib/logger"
+	"github.com/dollarshaveclub/furan/lib/metrics"
+	"github.com/dollarshaveclub/furan/lib/s3"
+	"github.com/dollarshaveclub/furan/lib/squasher"
+	"github.com/dollarshaveclub/furan/lib/tagcheck"
+	"github.com/dollarshaveclub/furan/lib/vault"
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 )
 
-var serverConfig lib.Serverconfig
+var serverConfig config.Serverconfig
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
@@ -73,13 +84,13 @@ func setupServerLogger() {
 	if err != nil {
 		log.Fatalf("error getting hostname: %v", err)
 	}
-	stdlog := lib.NewStandardLogger(os.Stderr, url)
+	stdlog := flogger.NewStandardLogger(os.Stderr, url)
 	logger = log.New(stdlog, fmt.Sprintf("%v: ", hn), log.LstdFlags)
 }
 
 // Separate server because it's HTTP on localhost only
 // (simplifies Consul health check)
-func healthcheck(ha *lib.HTTPAdapter) {
+func healthcheck(ha *httphandlers.HTTPAdapter) {
 	r := mux.NewRouter()
 	r.HandleFunc("/health", ha.HealthHandler).Methods("GET")
 	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.HealthcheckHTTPport)
@@ -94,8 +105,8 @@ func pprof() {
 	logger.Printf("pprof listening on port: %v", serverConfig.PPROFPort)
 }
 
-func startGC(dc lib.ImageBuildClient, mc lib.MetricsCollector, log *log.Logger, interval uint) {
-	igc := lib.NewDockerImageGC(log, dc, mc, serverConfig.DockerDiskPath)
+func startGC(dc builder.ImageBuildClient, mc metrics.MetricsCollector, log *log.Logger, interval uint) {
+	igc := gc.NewDockerImageGC(log, dc, mc, serverConfig.DockerDiskPath)
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	go func() {
 		for {
@@ -108,19 +119,19 @@ func startGC(dc lib.ImageBuildClient, mc lib.MetricsCollector, log *log.Logger, 
 }
 
 func server(cmd *cobra.Command, args []string) {
-	lib.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+	vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
 	if serverConfig.LogToSumo {
-		lib.GetSumoURL(&vaultConfig, &serverConfig)
+		vault.GetSumoURL(&vaultConfig, &serverConfig)
 	}
 	setupServerLogger()
 	setupDB(initializeDB)
-	mc, err := lib.NewDatadogCollector(dogstatsdAddr)
+	mc, err := metrics.NewDatadogCollector(dogstatsdAddr)
 	if err != nil {
 		log.Fatalf("error creating Datadog collector: %v", err)
 	}
 	setupKafka(mc)
-	certPath, keyPath := lib.WriteTLSCert(&vaultConfig, &serverConfig)
-	defer lib.RmTempFiles(certPath, keyPath)
+	certPath, keyPath := vault.WriteTLSCert(&vaultConfig, &serverConfig)
+	defer vault.RmTempFiles(certPath, keyPath)
 	err = getDockercfg()
 	if err != nil {
 		logger.Fatalf("error reading dockercfg: %v", err)
@@ -131,24 +142,24 @@ func server(cmd *cobra.Command, args []string) {
 		log.Fatalf("error creating Docker client: %v", err)
 	}
 
-	gf := lib.NewGitHubFetcher(gitConfig.Token)
-	osm := lib.NewS3StorageManager(awsConfig, mc, logger)
-	is := lib.NewDockerImageSquasher(logger)
-	itc := lib.NewRegistryTagChecker(&dockerConfig, logger.Printf)
-	s3errcfg := lib.S3ErrorLogConfig{
+	gf := githubfetch.NewGitHubFetcher(gitConfig.Token)
+	osm := s3.NewS3StorageManager(awsConfig, mc, logger)
+	is := squasher.NewDockerImageSquasher(logger)
+	itc := tagcheck.NewRegistryTagChecker(&dockerConfig, logger.Printf)
+	s3errcfg := builder.S3ErrorLogConfig{
 		PushToS3:          serverConfig.S3ErrorLogs,
 		Region:            serverConfig.S3ErrorLogRegion,
 		Bucket:            serverConfig.S3ErrorLogBucket,
 		PresignTTLMinutes: serverConfig.S3PresignTTL,
 	}
-	imageBuilder, err := lib.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, itc, dockerConfig.DockercfgContents, s3errcfg, logger)
+	imageBuilder, err := builder.NewImageBuilder(kafkaConfig.Manager, dbConfig.Datalayer, gf, dc, mc, osm, is, itc, dockerConfig.DockercfgContents, s3errcfg, logger)
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}
-	grpcSvr := lib.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, serverConfig.Queuesize, serverConfig.Concurrency, logger)
+	grpcSvr := grpc.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, serverConfig.Queuesize, serverConfig.Concurrency, logger)
 	go grpcSvr.ListenRPC(serverConfig.GRPCAddr, serverConfig.GRPCPort)
 
-	ha := lib.NewHTTPAdapter(grpcSvr)
+	ha := httphandlers.NewHTTPAdapter(grpcSvr)
 
 	stop := make(chan os.Signal, 10)
 	signal.Notify(stop, syscall.SIGTERM) //non-portable outside of POSIX systems
