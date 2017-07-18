@@ -56,3 +56,11 @@
 [[override]]
   branch = "master"
   name = "github.com/docker/engine-api"
+
+[[override]]
+  branch = "master"
+  name = "github.com/golang/mock"
+
+[[override]]
+  branch = "master"
+  name = "github.com/heroku/docker-registry-client"
