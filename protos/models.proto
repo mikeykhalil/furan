@@ -15,7 +15,6 @@ message BuildDefinition {
   string ref = 3; // sha/branch/tag
   repeated string tags = 4;
   bool tag_with_commit_sha = 5;
-  bool skip_if_exists = 6; // registry: all tags exist, s3: object exists
 }
 
 message PushRegistryDefinition {
@@ -38,6 +37,7 @@ message PushDefinition {
 message BuildRequest {
   BuildDefinition build = 1;
   PushDefinition push = 2;
+  bool skip_if_exists = 3; // (registry: all tags exist, s3: object exists)
 }
 
 message BuildStatusRequest {

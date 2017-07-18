@@ -222,7 +222,7 @@ func (ib *ImageBuilder) getFullImageNames(req *pb.BuildRequest) ([]string, error
 // tagCheck checks the existance of tags in the registry or the S3 object
 // returns true if build/push should be performed
 func (ib *ImageBuilder) tagCheck(req *pb.BuildRequest) (bool, error) {
-	if !req.Build.SkipIfExists {
+	if !req.SkipIfExists {
 		return true, nil
 	}
 	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
