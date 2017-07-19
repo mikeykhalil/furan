@@ -106,6 +106,7 @@ func NewImageBuilder(eventbus kafka.EventBusProducer, datalayer datalayer.DataLa
 	ib.dl = datalayer
 	ib.mc = mc
 	ib.osm = osm
+	ib.itc = itc
 	ib.is = is
 	ib.dockercfg = dcfg
 	ib.s3errorcfg = s3errorcfg
@@ -244,7 +245,7 @@ func (ib *ImageBuilder) tagCheck(req *pb.BuildRequest) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("error checking if S3 object exists: %v", err)
 		}
-		return ok, nil
+		return !ok, nil
 	}
 	tags := make([]string, len(req.Build.Tags))
 	copy(tags, req.Build.Tags)
@@ -255,7 +256,7 @@ func (ib *ImageBuilder) tagCheck(req *pb.BuildRequest) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("error checking if tags exist: %v", err)
 	}
-	return ok, nil
+	return !ok, nil
 }
 
 // Build builds an image accourding to the request
