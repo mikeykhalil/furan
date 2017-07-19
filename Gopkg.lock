@@ -45,7 +45,7 @@
 
 [[projects]]
   name = "github.com/docker/distribution"
-  packages = ["digest","reference"]
+  packages = [".","context","digest","manifest","manifest/schema1","manifest/schema2","reference","uuid"]
   revision = "a25b9ef0c9fe242ac04bb20d3a028442b7d266b6"
   version = "v2.6.1"
 
@@ -66,6 +66,12 @@
   packages = ["."]
   revision = "f2d77a61e3c169b43402a0a1e84f06daf29b8190"
   version = "v0.3.1"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/docker/libtrust"
+  packages = ["."]
+  revision = "aabc10ec26b754e797f9028f4589c5b7bd90dc20"
 
 [[projects]]
   branch = "master"
@@ -114,6 +120,12 @@
   name = "github.com/gocql/gocql"
   packages = [".","internal/lru","internal/murmur","internal/streams"]
   revision = "da4a50306e7bb46de0d077d7ac78c297de9aaac4"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/golang/mock"
+  packages = ["gomock"]
+  revision = "93f6609a15b7de76bd49259f1f9a6b58df358936"
 
 [[projects]]
   branch = "master"
@@ -204,6 +216,12 @@
   packages = ["api","helper/compressutil","helper/jsonutil"]
   revision = "0b20ae0b9b7a748d607082b1add3663a28e31b68"
   version = "v0.7.3"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/heroku/docker-registry-client"
+  packages = ["registry"]
+  revision = "95467b6cacee2a06f112a3cf7e47a70fad6000cf"
 
 [[projects]]
   branch = "master"
@@ -322,6 +340,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "0f2768d3438c346d2e40531d005ccafbe3cdc6f0a5ccfa13a31c3041d116a179"
+  inputs-digest = "d70c5d6ad6553a590c215f591a43a6bb0cfcc593b674f013c8a4d53d6771205f"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package lib;
+package pb;
 
 service FuranExecutor {
   rpc StartBuild (BuildRequest) returns (BuildRequestResponse) {}
@@ -37,6 +37,7 @@ message PushDefinition {
 message BuildRequest {
   BuildDefinition build = 1;
   PushDefinition push = 2;
+  bool skip_if_exists = 3; // (registry: all tags exist, s3: object exists)
 }
 
 message BuildStatusRequest {
@@ -65,6 +66,7 @@ message BuildStatusResponse {
     SUCCESS = 3;
     BUILD_FAILURE = 4;
     PUSH_FAILURE = 5;
+    NOT_NECESSARY = 6;
   }
   string build_id = 1;
   BuildRequest build_request = 2;
