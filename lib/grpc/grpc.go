@@ -281,6 +281,9 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outc
 		gr.logger.Printf("error pushing build duration metric: %v", err)
 	}
 	if err != nil {
+		if err == builder.ErrBuildNotNecessary {
+			return pb.BuildStatusResponse_NOT_NECESSARY
+		}
 		err = fmt.Errorf("error performing build: %v", err)
 		return pb.BuildStatusResponse_BUILD_FAILURE
 	}

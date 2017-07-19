@@ -26,6 +26,9 @@ import (
 	"github.com/gocql/gocql"
 )
 
+// ErrBuildNotNecessary indicates that the build was skipped due to not being necessary
+var ErrBuildNotNecessary = fmt.Errorf("build not necessary: tags or object exist")
+
 //go:generate stringer -type=actionType
 type actionType int
 
@@ -275,7 +278,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *pb.BuildRequest, id gocq
 		return "", fmt.Errorf("error checking if tags/object exist: %v", err)
 	}
 	if !ok {
-		return "", fmt.Errorf("build not necessary: tags or object exist")
+		return "", ErrBuildNotNecessary
 	}
 	owner := rl[0]
 	repo := rl[1]

@@ -66,6 +66,7 @@ message BuildStatusResponse {
     SUCCESS = 3;
     BUILD_FAILURE = 4;
     PUSH_FAILURE = 5;
+    NOT_NECESSARY = 6;
   }
   string build_id = 1;
   BuildRequest build_request = 2;
