@@ -1,18 +1,17 @@
 version: '2.1'
 services:
-  zookeeper:
-    image: confluent/zookeeper
-    ports:
-      - "2181"
+  docker:
+    image: docker:stable-dind
+    privileged: true
+    ports: 
+      - "2375:2375"
   kafka:
-    image: confluent/kafka
+    image: spotify/kafka
     ports:
       - "9092:9092"
+      - "2181:2181"
     environment:
-      KAFKA_ADVERTISED_HOST_NAME: kafka
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-    depends_on:
-      - zookeeper
+      ADVERTISED_HOST: kafka
   scylla:
     image: scylladb/scylla
     ports:
@@ -35,10 +34,7 @@ services:
     environment:
       - VAULT_TOKEN=root
       - VAULT_ADDR=http://vault:8200
-      - DOCKER_HOST
-      - DOCKER_API_VERSION
-      - DOCKER_TLS_VERIFY
-      - DOCKER_CERT_PATH=/opt/docker-certs
+      - DOCKER_HOST=tcp://docker:2375
     # delay startup to wait for other services to be ready and for network links to come up
     command: /dc-run.sh
     ports:
@@ -51,8 +47,7 @@ services:
       - kafka
       - scylla
       - vault
-    volumes:
-      - "$DOCKER_CERT_PATH:/opt/docker-certs"
+      - docker
     healthcheck:
       test: echo 'GET /' |nc localhost 4002
       interval: 25s
