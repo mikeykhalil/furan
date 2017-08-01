@@ -24,6 +24,7 @@ const (
 var discoverFuranHost bool
 var consulFuranSvcName string
 var remoteFuranHost string
+var monitorBuild bool
 
 // triggerCmd represents the trigger command
 var triggerCmd = &cobra.Command{
@@ -47,6 +48,7 @@ func init() {
 	triggerCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (optional, comma-delimited)")
 	triggerCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA (optional)")
 	triggerCmd.PersistentFlags().BoolVar(&cliBuildRequest.SkipIfExists, "skip-if-exists", false, "if build already exists at destination, skip build/push (registry: all tags exist, s3: object exists)")
+	triggerCmd.PersistentFlags().BoolVar(&monitorBuild, "monitor", true, "Monitor build after triggering")
 	RootCmd.AddCommand(triggerCmd)
 }
 
@@ -129,6 +131,11 @@ func trigger(cmd *cobra.Command, args []string) {
 	resp, err := c.StartBuild(context.Background(), &cliBuildRequest)
 	if err != nil {
 		rpcerr(err, "StartBuild")
+	}
+
+	if !monitorBuild {
+		log.Printf("build ID: %v\n", resp.BuildId)
+		return
 	}
 
 	mreq := lib.BuildStatusRequest{
