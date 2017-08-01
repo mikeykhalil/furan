@@ -11,6 +11,7 @@ import (
 	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/buildcontext"
 	"github.com/dollarshaveclub/furan/lib/builder"
+	"github.com/dollarshaveclub/furan/lib/consul"
 	"github.com/dollarshaveclub/furan/lib/datalayer"
 	"github.com/dollarshaveclub/furan/lib/kafka"
 	"github.com/dollarshaveclub/furan/lib/metrics"
@@ -71,6 +72,7 @@ type GrpcServer struct {
 	ec         kafka.EventBusConsumer
 	ls         io.Writer
 	mc         metrics.MetricsCollector
+	kvo        consul.KeyValueOrchestrator
 	abm        activeBuildMap
 	wcf        []context.CancelFunc // worker CancelFuncs
 	wwg        *sync.WaitGroup      //async goroutines waitgroup
@@ -87,13 +89,14 @@ type workerRequest struct {
 }
 
 // NewGRPCServer returns a new instance of the gRPC server
-func NewGRPCServer(ib builder.ImageBuildPusher, dl datalayer.DataLayer, ep kafka.EventBusProducer, ec kafka.EventBusConsumer, mc metrics.MetricsCollector, queuesize uint, concurrency uint, logger *log.Logger) *GrpcServer {
+func NewGRPCServer(ib builder.ImageBuildPusher, dl datalayer.DataLayer, ep kafka.EventBusProducer, ec kafka.EventBusConsumer, mc metrics.MetricsCollector, kvo consul.KeyValueOrchestrator, queuesize uint, concurrency uint, logger *log.Logger) *GrpcServer {
 	grs := &GrpcServer{
 		ib:         ib,
 		dl:         dl,
 		ep:         ep,
 		ec:         ec,
 		mc:         mc,
+		kvo:        kvo,
 		abm:        newActiveBuildMap(logger),
 		wcf:        []context.CancelFunc{},
 		wwg:        &sync.WaitGroup{},
@@ -208,15 +211,55 @@ func (gr *GrpcServer) totalDuration(ctx context.Context, req *lib.BuildRequest) 
 	return gr.mc.Duration("total.duration", req.Build.GithubRepo, req.Build.Ref, nil, d.Seconds())
 }
 
+// monitorCancelled watches the KV store and if this build is requested to be cancelled it cancels the context
+func (gr *GrpcServer) monitorCancelled(ctx context.Context, cf context.CancelFunc) {
+	var err error
+	var cancelled bool
+	id, ok := buildcontext.BuildIDFromContext(ctx)
+	if !ok {
+		gr.logf("build id missing from context")
+		return
+	}
+	start := time.Now().UTC()
+	timeout := 2 * time.Hour
+	for {
+		if time.Now().UTC().Sub(start) > timeout {
+			gr.logf("timed out")
+			return
+		}
+		if buildcontext.IsCancelled(ctx.Done()) { // context cancelled externally (build finished)
+			return
+		}
+		cancelled, err = gr.kvo.WatchIfBuildIsCancelled(id, 10*time.Second)
+		if err != nil {
+			gr.logf("error watching if build is cancelled: id: %v: %v", id.String(), err)
+			return
+		}
+		if cancelled {
+			cf()
+			return
+		}
+	}
+}
+
 // Performs build synchronously
 func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (outcome lib.BuildStatusResponse_BuildState) {
 	var err error // so deferred finalize function has access to any error
+	var cf context.CancelFunc
+	ctx, cf = context.WithCancel(ctx)
+	defer cf()
 	id, ok := buildcontext.BuildIDFromContext(ctx)
 	if !ok {
 		gr.logf("build id missing from context")
 		return
 	}
 	gr.logf("syncBuild started: %v", id.String())
+	if err := gr.kvo.SetBuildRunning(id); err != nil {
+		gr.logf("error setting build as running in KV: %v", err)
+		gr.logf("build will not be cancellable!")
+	}
+	defer gr.kvo.DeleteBuildRunning(id)
+	go gr.monitorCancelled(ctx, cf)
 	// Finalize build and send event. Failures should set err and return the appropriate build state.
 	defer func(id gocql.UUID) {
 		failed := outcome == lib.BuildStatusResponse_BUILD_FAILURE || outcome == lib.BuildStatusResponse_PUSH_FAILURE
@@ -285,6 +328,10 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (out
 			return lib.BuildStatusResponse_NOT_NECESSARY
 		}
 		err = fmt.Errorf("error performing build: %v", err)
+		return lib.BuildStatusResponse_BUILD_FAILURE
+	}
+	if buildcontext.IsCancelled(ctx.Done()) {
+		err = fmt.Errorf("build was cancelled")
 		return lib.BuildStatusResponse_BUILD_FAILURE
 	}
 	err = gr.dl.SetBuildState(id, lib.BuildStatusResponse_PUSHING)
@@ -441,7 +488,34 @@ func (gr *GrpcServer) MonitorBuild(req *lib.BuildStatusRequest, stream lib.Furan
 
 // CancelBuild stops a currently-running build
 func (gr *GrpcServer) CancelBuild(ctx context.Context, req *lib.BuildCancelRequest) (*lib.BuildCancelResponse, error) {
-	return nil, grpc.Errorf(codes.Unimplemented, "cancellation not implemented")
+	id, err := gocql.ParseUUID(req.BuildId)
+	if err != nil {
+		return nil, grpc.Errorf(codes.InvalidArgument, "invalid BuildId")
+	}
+	running, err := gr.kvo.CheckIfBuildRunning(id)
+	if err != nil {
+		return nil, grpc.Errorf(codes.Internal, "error checking if build is running: %v", err)
+	}
+	if !running {
+		return nil, grpc.Errorf(codes.FailedPrecondition, "build not running")
+	}
+	err = gr.kvo.SetBuildCancelled(id)
+	if err != nil {
+		return nil, grpc.Errorf(codes.Internal, "error setting build as cancelled: %v", err)
+	}
+	defer gr.kvo.DeleteBuildCancelled(id)
+
+	var gone bool
+	for i := 0; i < 5; i++ {
+		gone, err = gr.kvo.WatchIfBuildStopsRunning(id, 1*time.Minute)
+		if err != nil {
+			return nil, grpc.Errorf(codes.Internal, "error watching if build stops running: %v", err)
+		}
+		if gone {
+			return &lib.BuildCancelResponse{BuildId: req.BuildId}, nil
+		}
+	}
+	return nil, grpc.Errorf(codes.DeadlineExceeded, "timed out waiting for build to stop")
 }
 
 // Shutdown gracefully stops the GRPC server, signals all workers and builds to stop and then waits for goroutines to finish
