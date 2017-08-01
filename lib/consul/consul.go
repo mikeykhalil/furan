@@ -17,7 +17,7 @@ type KeyValueOrchestrator interface {
 	DeleteBuildCancelled(id gocql.UUID) error
 	CheckIfBuildRunning(id gocql.UUID) (bool, error)
 	WatchIfBuildStopsRunning(id gocql.UUID, timeout time.Duration) (bool, error)
-	WatchIfBuildCancelled(id gocql.UUID, timeout time.Duration) (bool, error)
+	WatchIfBuildIsCancelled(id gocql.UUID, timeout time.Duration) (bool, error)
 }
 
 // ConsulKVOrchestrator is an object that orchestrates via Consul
@@ -163,9 +163,9 @@ func (cko *ConsulKVOrchestrator) WatchIfBuildStopsRunning(id gocql.UUID, timeout
 	return cko.watchPrefix(pfx, timeout, keyMissing)
 }
 
-// WatchIfBuildCancelled blocks waiting for build to appear in cancelled in Consul.
+// WatchIfBuildIsCancelled blocks waiting for build to appear in cancelled in Consul.
 // false is returned if timeout occurs prior to build appearing
-func (cko *ConsulKVOrchestrator) WatchIfBuildCancelled(id gocql.UUID, timeout time.Duration) (bool, error) {
+func (cko *ConsulKVOrchestrator) WatchIfBuildIsCancelled(id gocql.UUID, timeout time.Duration) (bool, error) {
 	pfx := cko.cfg.KVPrefix + "/cancelled/"
 	target := pfx + id.String()
 

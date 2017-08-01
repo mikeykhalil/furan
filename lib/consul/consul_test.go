@@ -2,6 +2,7 @@ package consul
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dollarshaveclub/furan/lib/config"
 	"github.com/dollarshaveclub/furan/lib/mocks"
@@ -13,18 +14,6 @@ import (
 var testConsulconfig = &config.Consulconfig{
 	KVPrefix: "/furan",
 }
-
-/*
-type KeyValueOrchestrator interface {
-	SetBuildRunning(id gocql.UUID) error
-	DeleteBuildRunning(id gocql.UUID) error
-	SetBuildCancelled(id gocql.UUID) error
-	DeleteBuildCancelled(id gocql.UUID) error
-	CheckIfBuildRunning(id gocql.UUID) (bool, error)
-	WatchIfBuildStopsRunning(id gocql.UUID, timeout time.Duration) (bool, error)
-	WatchIfBuildCancelled(id gocql.UUID, timeout time.Duration) (bool, error)
-}
-*/
 
 func TestSetBuildRunning(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -39,6 +28,26 @@ func TestSetBuildRunning(t *testing.T) {
 	err = cvo.SetBuildRunning(id)
 	if err != nil {
 		t.Fatalf("should have succeeded: %v", err)
+	}
+}
+
+func TestCheckIfBuildRunning(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mconsul := mocks.NewMockConsulKV(ctrl)
+	defer ctrl.Finish()
+	id, _ := gocql.RandomUUID()
+	key := testConsulconfig.KVPrefix + "/running/" + id.String()
+	mconsul.EXPECT().Get(key, nil).Return(&consul.KVPair{Key: key}, nil, nil).Times(1)
+	cvo, err := newConsulKVOrchestrator(mconsul, testConsulconfig)
+	if err != nil {
+		t.Fatalf("error creating consul orchestrator: %v", err)
+	}
+	running, err := cvo.CheckIfBuildRunning(id)
+	if err != nil {
+		t.Fatalf("should have succeeded: %v", err)
+	}
+	if !running {
+		t.Fatalf("should have been true")
 	}
 }
 
@@ -87,5 +96,94 @@ func TestDeleteBuildCancelled(t *testing.T) {
 	err = cvo.DeleteBuildCancelled(id)
 	if err != nil {
 		t.Fatalf("should have succeeded: %v", err)
+	}
+}
+
+func TestWatchIfBuildStopsRunning(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mconsul := mocks.NewMockConsulKV(ctrl)
+	defer ctrl.Finish()
+	id, _ := gocql.RandomUUID()
+	pfx := testConsulconfig.KVPrefix + "/running/"
+	target := pfx + id.String()
+	gomock.InOrder(
+		mconsul.EXPECT().Keys(pfx, "", nil).Return([]string{target}, &consul.QueryMeta{}, nil),
+		mconsul.EXPECT().Keys(pfx, "", gomock.Any()).Return([]string{}, &consul.QueryMeta{}, nil),
+	)
+	cvo, err := newConsulKVOrchestrator(mconsul, testConsulconfig)
+	if err != nil {
+		t.Fatalf("error creating consul orchestrator: %v", err)
+	}
+	yes, err := cvo.WatchIfBuildStopsRunning(id, 1*time.Second)
+	if err != nil {
+		t.Fatalf("should have succeeded")
+	}
+	if !yes {
+		t.Fatalf("should have been true")
+	}
+}
+
+func TestWatchIfBuildStopsRunningTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mconsul := mocks.NewMockConsulKV(ctrl)
+	defer ctrl.Finish()
+	id, _ := gocql.RandomUUID()
+	pfx := testConsulconfig.KVPrefix + "/running/"
+	target := pfx + id.String()
+	mconsul.EXPECT().Keys(pfx, "", gomock.Any()).Return([]string{target}, &consul.QueryMeta{}, nil).AnyTimes()
+	cvo, err := newConsulKVOrchestrator(mconsul, testConsulconfig)
+	if err != nil {
+		t.Fatalf("error creating consul orchestrator: %v", err)
+	}
+	yes, err := cvo.WatchIfBuildStopsRunning(id, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("should have succeeded")
+	}
+	if yes {
+		t.Fatalf("should have timed out")
+	}
+}
+
+func TestWatchIfBuildIsCancelled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mconsul := mocks.NewMockConsulKV(ctrl)
+	defer ctrl.Finish()
+	id, _ := gocql.RandomUUID()
+	pfx := testConsulconfig.KVPrefix + "/cancelled/"
+	target := pfx + id.String()
+	gomock.InOrder(
+		mconsul.EXPECT().Keys(pfx, "", nil).Return([]string{}, &consul.QueryMeta{}, nil),
+		mconsul.EXPECT().Keys(pfx, "", gomock.Any()).Return([]string{target}, &consul.QueryMeta{}, nil),
+	)
+	cvo, err := newConsulKVOrchestrator(mconsul, testConsulconfig)
+	if err != nil {
+		t.Fatalf("error creating consul orchestrator: %v", err)
+	}
+	yes, err := cvo.WatchIfBuildIsCancelled(id, 1*time.Second)
+	if err != nil {
+		t.Fatalf("should have succeeded")
+	}
+	if !yes {
+		t.Fatalf("should have been true")
+	}
+}
+
+func TestWatchIfBuildIsCancelledTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mconsul := mocks.NewMockConsulKV(ctrl)
+	defer ctrl.Finish()
+	id, _ := gocql.RandomUUID()
+	pfx := testConsulconfig.KVPrefix + "/cancelled/"
+	mconsul.EXPECT().Keys(pfx, "", gomock.Any()).Return([]string{}, &consul.QueryMeta{}, nil).AnyTimes()
+	cvo, err := newConsulKVOrchestrator(mconsul, testConsulconfig)
+	if err != nil {
+		t.Fatalf("error creating consul orchestrator: %v", err)
+	}
+	yes, err := cvo.WatchIfBuildIsCancelled(id, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("should have succeeded")
+	}
+	if yes {
+		t.Fatalf("should have timed out")
 	}
 }
