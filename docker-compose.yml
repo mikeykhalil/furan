@@ -28,6 +28,10 @@ services:
       - "8200:8200"
     volumes:
       - "$PWD/local_dev_secrets.json:/opt/secrets.json"
+  consul:
+    image: consul
+    ports:
+      - "8500:8500"
   furan:
     build: .
     image: furan:local
@@ -48,8 +52,42 @@ services:
       - scylla
       - vault
       - docker
+      - consul
     healthcheck:
       test: echo 'GET /' |nc localhost 4002
       interval: 25s
       timeout: 5s
       retries: 10
+
+  # to test multiple instances:
+
+  # furan2:
+  #   build: .
+  #   image: furan:local
+  #   environment:
+  #     - VAULT_TOKEN=root
+  #     - VAULT_ADDR=http://vault:8200
+  #     - DOCKER_HOST
+  #     - DOCKER_API_VERSION
+  #     - DOCKER_TLS_VERIFY
+  #     - DOCKER_CERT_PATH=/opt/docker-certs
+  #   # delay startup to wait for other services to be ready and for network links to come up
+  #   command: /dc-run.sh
+  #   ports:
+  #     - "5000:4000"
+  #     - "5001:4001"
+  #     - "5002:4002"
+  #   ulimits:
+  #     nofile: 65535
+  #   depends_on:
+  #     - kafka
+  #     - scylla
+  #     - vault
+  #     - consul
+  #   volumes:
+  #     - "$DOCKER_CERT_PATH:/opt/docker-certs"
+  #   healthcheck:
+  #     test: echo 'GET /' |nc localhost 4002
+  #     interval: 25s
+  #     timeout: 5s
+  #     retries: 10
