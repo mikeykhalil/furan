@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/buildcontext"
 	"github.com/dollarshaveclub/furan/lib/builder"
 	"github.com/dollarshaveclub/furan/lib/datalayer"
@@ -83,7 +83,7 @@ type GrpcServer struct {
 
 type workerRequest struct {
 	ctx context.Context
-	req *pb.BuildRequest
+	req *lib.BuildRequest
 }
 
 // NewGRPCServer returns a new instance of the gRPC server
@@ -160,7 +160,7 @@ func (gr *GrpcServer) ListenRPC(addr string, port uint) error {
 	}
 	s := grpc.NewServer()
 	gr.s = s
-	pb.RegisterFuranExecutorServer(s, gr)
+	lib.RegisterFuranExecutorServer(s, gr)
 	gr.logf("gRPC listening on: %v", addr)
 	return s.Serve(l)
 }
@@ -177,7 +177,7 @@ func (gr *GrpcServer) durationFromStarted(ctx context.Context) (time.Duration, e
 	return time.Now().UTC().Sub(started), nil
 }
 
-func (gr *GrpcServer) buildDuration(ctx context.Context, req *pb.BuildRequest) error {
+func (gr *GrpcServer) buildDuration(ctx context.Context, req *lib.BuildRequest) error {
 	d, err := gr.durationFromStarted(ctx)
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func (gr *GrpcServer) buildDuration(ctx context.Context, req *pb.BuildRequest) e
 	return gr.mc.Duration("build.duration", req.Build.GithubRepo, req.Build.Ref, nil, d.Seconds())
 }
 
-func (gr *GrpcServer) pushDuration(ctx context.Context, req *pb.BuildRequest, s3 bool) error {
+func (gr *GrpcServer) pushDuration(ctx context.Context, req *lib.BuildRequest, s3 bool) error {
 	ps, ok := buildcontext.PushStartedFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("push_started missing from context")
@@ -200,7 +200,7 @@ func (gr *GrpcServer) pushDuration(ctx context.Context, req *pb.BuildRequest, s3
 	return gr.mc.Duration("push.duration", req.Build.GithubRepo, req.Build.Ref, tags, d)
 }
 
-func (gr *GrpcServer) totalDuration(ctx context.Context, req *pb.BuildRequest) error {
+func (gr *GrpcServer) totalDuration(ctx context.Context, req *lib.BuildRequest) error {
 	d, err := gr.durationFromStarted(ctx)
 	if err != nil {
 		return err
@@ -209,7 +209,7 @@ func (gr *GrpcServer) totalDuration(ctx context.Context, req *pb.BuildRequest) e
 }
 
 // Performs build synchronously
-func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outcome pb.BuildStatusResponse_BuildState) {
+func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (outcome lib.BuildStatusResponse_BuildState) {
 	var err error // so deferred finalize function has access to any error
 	id, ok := buildcontext.BuildIDFromContext(ctx)
 	if !ok {
@@ -219,17 +219,17 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outc
 	gr.logf("syncBuild started: %v", id.String())
 	// Finalize build and send event. Failures should set err and return the appropriate build state.
 	defer func(id gocql.UUID) {
-		failed := outcome == pb.BuildStatusResponse_BUILD_FAILURE || outcome == pb.BuildStatusResponse_PUSH_FAILURE
+		failed := outcome == lib.BuildStatusResponse_BUILD_FAILURE || outcome == lib.BuildStatusResponse_PUSH_FAILURE
 		flags := map[string]bool{
 			"failed":   failed,
 			"finished": true,
 		}
-		var eet pb.BuildEventError_ErrorType
+		var eet lib.BuildEventError_ErrorType
 		if failed {
-			eet = pb.BuildEventError_FATAL
+			eet = lib.BuildEventError_FATAL
 			gr.mc.BuildFailed(req.Build.GithubRepo, req.Build.Ref)
 		} else {
-			eet = pb.BuildEventError_NO_ERROR
+			eet = lib.BuildEventError_NO_ERROR
 			gr.mc.BuildSucceeded(req.Build.GithubRepo, req.Build.Ref)
 		}
 		if err := gr.totalDuration(ctx, req); err != nil {
@@ -248,14 +248,14 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outc
 		if err2 := gr.dl.SetBuildFlags(id, flags); err2 != nil {
 			gr.logf("failBuild: error setting build flags: %v", err2)
 		}
-		event := &pb.BuildEvent{
-			EventError: &pb.BuildEventError{
+		event := &lib.BuildEvent{
+			EventError: &lib.BuildEventError{
 				ErrorType: eet,
-				IsError:   eet != pb.BuildEventError_NO_ERROR,
+				IsError:   eet != lib.BuildEventError_NO_ERROR,
 			},
 			BuildId:       id.String(),
 			BuildFinished: true,
-			EventType:     pb.BuildEvent_LOG,
+			EventType:     lib.BuildEvent_LOG,
 			Message:       msg,
 		}
 		if err2 := gr.ep.PublishEvent(event); err2 != nil {
@@ -269,12 +269,12 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outc
 	}
 	if buildcontext.IsCancelled(ctx.Done()) {
 		err = fmt.Errorf("build was cancelled")
-		return pb.BuildStatusResponse_BUILD_FAILURE
+		return lib.BuildStatusResponse_BUILD_FAILURE
 	}
-	err = gr.dl.SetBuildState(id, pb.BuildStatusResponse_BUILDING)
+	err = gr.dl.SetBuildState(id, lib.BuildStatusResponse_BUILDING)
 	if err != nil {
 		err = fmt.Errorf("error setting build state to building: %v", err)
-		return pb.BuildStatusResponse_BUILD_FAILURE
+		return lib.BuildStatusResponse_BUILD_FAILURE
 	}
 	imageid, err := gr.ib.Build(ctx, req, id)
 	if err := gr.buildDuration(ctx, req); err != nil {
@@ -282,15 +282,15 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outc
 	}
 	if err != nil {
 		if err == builder.ErrBuildNotNecessary {
-			return pb.BuildStatusResponse_NOT_NECESSARY
+			return lib.BuildStatusResponse_NOT_NECESSARY
 		}
 		err = fmt.Errorf("error performing build: %v", err)
-		return pb.BuildStatusResponse_BUILD_FAILURE
+		return lib.BuildStatusResponse_BUILD_FAILURE
 	}
-	err = gr.dl.SetBuildState(id, pb.BuildStatusResponse_PUSHING)
+	err = gr.dl.SetBuildState(id, lib.BuildStatusResponse_PUSHING)
 	if err != nil {
 		err = fmt.Errorf("error setting build state to pushing: %v", err)
-		return pb.BuildStatusResponse_BUILD_FAILURE
+		return lib.BuildStatusResponse_BUILD_FAILURE
 	}
 	ctx = buildcontext.NewPushStartedContext(ctx)
 	s3 := req.Push.Registry.Repo == ""
@@ -304,28 +304,28 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *pb.BuildRequest) (outc
 	}
 	if err != nil {
 		err = fmt.Errorf("error pushing: %v", err)
-		return pb.BuildStatusResponse_PUSH_FAILURE
+		return lib.BuildStatusResponse_PUSH_FAILURE
 	}
 	err = gr.ib.CleanImage(ctx, imageid)
 	if err != nil { // Cleaning images is non-fatal because concurrent builds can cause failures here
 		gr.logger.Printf("CleanImage error (non-fatal): %v", err)
 	}
-	err = gr.dl.SetBuildState(id, pb.BuildStatusResponse_SUCCESS)
+	err = gr.dl.SetBuildState(id, lib.BuildStatusResponse_SUCCESS)
 	if err != nil {
 		err = fmt.Errorf("error setting build state to success: %v", err)
-		return pb.BuildStatusResponse_PUSH_FAILURE
+		return lib.BuildStatusResponse_PUSH_FAILURE
 	}
 	err = gr.dl.SetBuildCompletedTimestamp(id)
 	if err != nil {
 		err = fmt.Errorf("error setting build completed timestamp: %v", err)
-		return pb.BuildStatusResponse_PUSH_FAILURE
+		return lib.BuildStatusResponse_PUSH_FAILURE
 	}
-	return pb.BuildStatusResponse_SUCCESS
+	return lib.BuildStatusResponse_SUCCESS
 }
 
 // gRPC handlers
-func (gr *GrpcServer) StartBuild(ctx context.Context, req *pb.BuildRequest) (*pb.BuildRequestResponse, error) {
-	resp := &pb.BuildRequestResponse{}
+func (gr *GrpcServer) StartBuild(ctx context.Context, req *lib.BuildRequest) (*lib.BuildRequestResponse, error) {
+	resp := &lib.BuildRequestResponse{}
 	if req.Push.Registry.Repo == "" {
 		if req.Push.S3.Bucket == "" || req.Push.S3.KeyPrefix == "" || req.Push.S3.Region == "" {
 			return nil, grpc.Errorf(codes.InvalidArgument, "must specify either registry repo or S3 region/bucket/key-prefix")
@@ -357,8 +357,8 @@ func (gr *GrpcServer) StartBuild(ctx context.Context, req *pb.BuildRequest) (*pb
 	}
 }
 
-func (gr *GrpcServer) GetBuildStatus(ctx context.Context, req *pb.BuildStatusRequest) (*pb.BuildStatusResponse, error) {
-	resp := &pb.BuildStatusResponse{}
+func (gr *GrpcServer) GetBuildStatus(ctx context.Context, req *lib.BuildStatusRequest) (*lib.BuildStatusResponse, error) {
+	resp := &lib.BuildStatusResponse{}
 	id, err := gocql.ParseUUID(req.BuildId)
 	if err != nil {
 		return nil, grpc.Errorf(codes.InvalidArgument, "bad id: %v", err)
@@ -375,7 +375,7 @@ func (gr *GrpcServer) GetBuildStatus(ctx context.Context, req *pb.BuildStatusReq
 }
 
 // Reconstruct the stream of events for a build from the data layer
-func (gr *GrpcServer) eventsFromDL(stream pb.FuranExecutor_MonitorBuildServer, id gocql.UUID) error {
+func (gr *GrpcServer) eventsFromDL(stream lib.FuranExecutor_MonitorBuildServer, id gocql.UUID) error {
 	bo, err := gr.dl.GetBuildOutput(id, "build_output")
 	if err != nil {
 		return fmt.Errorf("error getting build output: %v", err)
@@ -394,9 +394,9 @@ func (gr *GrpcServer) eventsFromDL(stream pb.FuranExecutor_MonitorBuildServer, i
 	return nil
 }
 
-func (gr *GrpcServer) eventsFromEventBus(stream pb.FuranExecutor_MonitorBuildServer, id gocql.UUID) error {
+func (gr *GrpcServer) eventsFromEventBus(stream lib.FuranExecutor_MonitorBuildServer, id gocql.UUID) error {
 	var err error
-	output := make(chan *pb.BuildEvent)
+	output := make(chan *lib.BuildEvent)
 	done := make(chan struct{})
 	defer func() {
 		select {
@@ -410,7 +410,7 @@ func (gr *GrpcServer) eventsFromEventBus(stream pb.FuranExecutor_MonitorBuildSer
 	if err != nil {
 		return err
 	}
-	var event *pb.BuildEvent
+	var event *lib.BuildEvent
 	for {
 		event = <-output
 		if event == nil {
@@ -424,7 +424,7 @@ func (gr *GrpcServer) eventsFromEventBus(stream pb.FuranExecutor_MonitorBuildSer
 }
 
 // MonitorBuild streams events from a specified build
-func (gr *GrpcServer) MonitorBuild(req *pb.BuildStatusRequest, stream pb.FuranExecutor_MonitorBuildServer) error {
+func (gr *GrpcServer) MonitorBuild(req *lib.BuildStatusRequest, stream lib.FuranExecutor_MonitorBuildServer) error {
 	id, err := gocql.ParseUUID(req.BuildId)
 	if err != nil {
 		return grpc.Errorf(codes.InvalidArgument, "bad build id: %v", err)
@@ -440,7 +440,7 @@ func (gr *GrpcServer) MonitorBuild(req *pb.BuildStatusRequest, stream pb.FuranEx
 }
 
 // CancelBuild stops a currently-running build
-func (gr *GrpcServer) CancelBuild(ctx context.Context, req *pb.BuildCancelRequest) (*pb.BuildCancelResponse, error) {
+func (gr *GrpcServer) CancelBuild(ctx context.Context, req *lib.BuildCancelRequest) (*lib.BuildCancelResponse, error) {
 	return nil, grpc.Errorf(codes.Unimplemented, "cancellation not implemented")
 }
 

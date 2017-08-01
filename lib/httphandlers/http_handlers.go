@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	fgrpc "github.com/dollarshaveclub/furan/lib/grpc"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
@@ -29,26 +29,26 @@ func NewHTTPAdapter(gr *fgrpc.GrpcServer) *HTTPAdapter {
 }
 
 // any null values (omitted) will be deserialized as nil, replace with empty structs
-func (ha *HTTPAdapter) unmarshalRequest(r io.Reader) (*pb.BuildRequest, error) {
-	req := pb.BuildRequest{}
+func (ha *HTTPAdapter) unmarshalRequest(r io.Reader) (*lib.BuildRequest, error) {
+	req := lib.BuildRequest{}
 	err := jsonpb.Unmarshal(r, &req)
 	if err != nil {
 		return nil, err
 	}
 	if req.Build == nil {
-		req.Build = &pb.BuildDefinition{}
+		req.Build = &lib.BuildDefinition{}
 	}
 	if req.Push == nil {
-		req.Push = &pb.PushDefinition{
-			Registry: &pb.PushRegistryDefinition{},
-			S3:       &pb.PushS3Definition{},
+		req.Push = &lib.PushDefinition{
+			Registry: &lib.PushRegistryDefinition{},
+			S3:       &lib.PushS3Definition{},
 		}
 	}
 	if req.Push.Registry == nil {
-		req.Push.Registry = &pb.PushRegistryDefinition{}
+		req.Push.Registry = &lib.PushRegistryDefinition{}
 	}
 	if req.Push.S3 == nil {
-		req.Push.S3 = &pb.PushS3Definition{}
+		req.Push.S3 = &lib.PushS3Definition{}
 	}
 	return &req, nil
 }
@@ -82,7 +82,7 @@ func (ha *HTTPAdapter) BuildRequestHandler(w http.ResponseWriter, r *http.Reques
 
 func (ha *HTTPAdapter) BuildStatusHandler(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	req := pb.BuildStatusRequest{
+	req := lib.BuildStatusRequest{
 		BuildId: id,
 	}
 	resp, err := ha.gr.GetBuildStatus(context.Background(), &req)
@@ -94,7 +94,7 @@ func (ha *HTTPAdapter) BuildStatusHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (ha *HTTPAdapter) BuildCancelHandler(w http.ResponseWriter, r *http.Request) {
-	var req pb.BuildCancelRequest
+	var req lib.BuildCancelRequest
 	err := jsonpb.Unmarshal(r.Body, &req)
 	if err != nil {
 		ha.badRequestError(w, err)

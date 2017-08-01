@@ -3,7 +3,7 @@ package db
 import (
 	"log"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/go-lib/cassandra"
 )
 
@@ -23,7 +23,7 @@ type BuildRequestUDT struct {
 }
 
 // UDTFromBuildRequest constructs a UDT struct from a BuildRequest
-func UDTFromBuildRequest(req *pb.BuildRequest) *BuildRequestUDT {
+func UDTFromBuildRequest(req *lib.BuildRequest) *BuildRequestUDT {
 	return &BuildRequestUDT{
 		GithubRepo:       req.Build.GithubRepo,
 		DockerfilePath:   req.Build.DockerfilePath,
@@ -38,12 +38,12 @@ func UDTFromBuildRequest(req *pb.BuildRequest) *BuildRequestUDT {
 }
 
 // BuildRequestFromUDT constructs a BuildRequest from a UDT
-func BuildRequestFromUDT(udt *BuildRequestUDT) *pb.BuildRequest {
-	br := &pb.BuildRequest{
-		Build: &pb.BuildDefinition{},
-		Push: &pb.PushDefinition{
-			Registry: &pb.PushRegistryDefinition{},
-			S3:       &pb.PushS3Definition{},
+func BuildRequestFromUDT(udt *BuildRequestUDT) *lib.BuildRequest {
+	br := &lib.BuildRequest{
+		Build: &lib.BuildDefinition{},
+		Push: &lib.PushDefinition{
+			Registry: &lib.PushRegistryDefinition{},
+			S3:       &lib.PushS3Definition{},
 		},
 	}
 	br.Build.GithubRepo = udt.GithubRepo
@@ -59,12 +59,12 @@ func BuildRequestFromUDT(udt *BuildRequestUDT) *pb.BuildRequest {
 }
 
 // BuildStateFromString returns the enum value from the string stored in the DB
-func BuildStateFromString(state string) pb.BuildStatusResponse_BuildState {
-	if val, ok := pb.BuildStatusResponse_BuildState_value[state]; ok {
-		return pb.BuildStatusResponse_BuildState(val)
+func BuildStateFromString(state string) lib.BuildStatusResponse_BuildState {
+	if val, ok := lib.BuildStatusResponse_BuildState_value[state]; ok {
+		return lib.BuildStatusResponse_BuildState(val)
 	}
 	log.Fatalf("build state '%v' not found in enum! stale protobuf definition?", state)
-	return pb.BuildStatusResponse_BUILDING //unreachable
+	return lib.BuildStatusResponse_BUILDING //unreachable
 }
 
 // RequiredUDTs are the UDTs we need defined in the DB

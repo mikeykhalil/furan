@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/db"
 	"github.com/gocql/gocql"
 	"github.com/golang/protobuf/proto"
@@ -12,16 +12,16 @@ import (
 
 // DataLayer describes an object that interacts with the persistant data store
 type DataLayer interface {
-	CreateBuild(*pb.BuildRequest) (gocql.UUID, error)
-	GetBuildByID(gocql.UUID) (*pb.BuildStatusResponse, error)
+	CreateBuild(*lib.BuildRequest) (gocql.UUID, error)
+	GetBuildByID(gocql.UUID) (*lib.BuildStatusResponse, error)
 	SetBuildFlags(gocql.UUID, map[string]bool) error
 	SetBuildCompletedTimestamp(gocql.UUID) error
-	SetBuildState(gocql.UUID, pb.BuildStatusResponse_BuildState) error
+	SetBuildState(gocql.UUID, lib.BuildStatusResponse_BuildState) error
 	DeleteBuild(gocql.UUID) error
 	SetBuildTimeMetric(gocql.UUID, string) error
 	SetDockerImageSizesMetric(gocql.UUID, int64, int64) error
-	SaveBuildOutput(gocql.UUID, []pb.BuildEvent, string) error
-	GetBuildOutput(gocql.UUID, string) ([]pb.BuildEvent, error)
+	SaveBuildOutput(gocql.UUID, []lib.BuildEvent, string) error
+	GetBuildOutput(gocql.UUID, string) ([]lib.BuildEvent, error)
 }
 
 // DBLayer is an DataLayer instance that interacts with the Cassandra database
@@ -35,7 +35,7 @@ func NewDBLayer(s *gocql.Session) *DBLayer {
 }
 
 // CreateBuild inserts a new build into the DB returning the ID
-func (dl *DBLayer) CreateBuild(req *pb.BuildRequest) (gocql.UUID, error) {
+func (dl *DBLayer) CreateBuild(req *lib.BuildRequest) (gocql.UUID, error) {
 	q := `INSERT INTO builds_by_id (id, request, state, finished, failed, cancelled, started)
         VALUES (?,{github_repo: ?, dockerfile_path: ?, tags: ?, tag_with_commit_sha: ?, ref: ?,
 					push_registry_repo: ?, push_s3_region: ?, push_s3_bucket: ?,
@@ -47,7 +47,7 @@ func (dl *DBLayer) CreateBuild(req *pb.BuildRequest) (gocql.UUID, error) {
 	udt := db.UDTFromBuildRequest(req)
 	err = dl.s.Query(q, id, udt.GithubRepo, udt.DockerfilePath, udt.Tags, udt.TagWithCommitSha, udt.Ref,
 		udt.PushRegistryRepo, udt.PushS3Region, udt.PushS3Bucket, udt.PushS3KeyPrefix,
-		pb.BuildStatusResponse_STARTED.String(), false, false, false, time.Now()).Exec()
+		lib.BuildStatusResponse_STARTED.String(), false, false, false, time.Now()).Exec()
 	if err != nil {
 		return id, err
 	}
@@ -61,13 +61,13 @@ func (dl *DBLayer) CreateBuild(req *pb.BuildRequest) (gocql.UUID, error) {
 }
 
 // GetBuildByID fetches a build object from the DB
-func (dl *DBLayer) GetBuildByID(id gocql.UUID) (*pb.BuildStatusResponse, error) {
+func (dl *DBLayer) GetBuildByID(id gocql.UUID) (*lib.BuildStatusResponse, error) {
 	q := `SELECT request, state, finished, failed, cancelled, started, completed,
 	      duration FROM builds_by_id WHERE id = ?;`
 	var udt db.BuildRequestUDT
 	var state string
 	var started, completed time.Time
-	bi := &pb.BuildStatusResponse{
+	bi := &lib.BuildStatusResponse{
 		BuildId: id.String(),
 	}
 	err := dl.s.Query(q, id).Scan(&udt, &state, &bi.Finished, &bi.Failed,
@@ -111,7 +111,7 @@ func (dl *DBLayer) SetBuildCompletedTimestamp(id gocql.UUID) error {
 }
 
 // SetBuildState sets the state of a build
-func (dl *DBLayer) SetBuildState(id gocql.UUID, state pb.BuildStatusResponse_BuildState) error {
+func (dl *DBLayer) SetBuildState(id gocql.UUID, state lib.BuildStatusResponse_BuildState) error {
 	q := `UPDATE builds_by_id SET state = ? WHERE id = ?;`
 	return dl.s.Query(q, state.String(), id).Exec()
 }
@@ -175,7 +175,7 @@ func (dl *DBLayer) SetDockerImageSizesMetric(id gocql.UUID, size int64, vsize in
 }
 
 // SaveBuildOutput serializes an array of stream events to the database
-func (dl *DBLayer) SaveBuildOutput(id gocql.UUID, output []pb.BuildEvent, column string) error {
+func (dl *DBLayer) SaveBuildOutput(id gocql.UUID, output []lib.BuildEvent, column string) error {
 	serialized := make([][]byte, len(output))
 	var err error
 	var b []byte
@@ -191,16 +191,16 @@ func (dl *DBLayer) SaveBuildOutput(id gocql.UUID, output []pb.BuildEvent, column
 }
 
 // GetBuildOutput returns an array of stream events from the database
-func (dl *DBLayer) GetBuildOutput(id gocql.UUID, column string) ([]pb.BuildEvent, error) {
+func (dl *DBLayer) GetBuildOutput(id gocql.UUID, column string) ([]lib.BuildEvent, error) {
 	var rawoutput [][]byte
-	output := []pb.BuildEvent{}
+	output := []lib.BuildEvent{}
 	q := `SELECT %v FROM build_events_by_id WHERE id = ?;`
 	err := dl.s.Query(fmt.Sprintf(q, column), id).Scan(&rawoutput)
 	if err != nil {
 		return output, err
 	}
 	for _, rawevent := range rawoutput {
-		event := pb.BuildEvent{}
+		event := lib.BuildEvent{}
 		err = proto.Unmarshal(rawevent, &event)
 		if err != nil {
 			return output, err

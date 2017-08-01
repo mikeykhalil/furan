@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/context"
 
 	dtypes "github.com/docker/engine-api/types"
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/buildcontext"
 	"github.com/dollarshaveclub/furan/lib/datalayer"
 	"github.com/dollarshaveclub/furan/lib/github_fetch"
@@ -42,12 +42,12 @@ const (
 	legalDockerTagChars = "abcdefghijklmnopqrtsuvwxyz-_.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
-func buildEventTypeFromActionType(atype actionType) pb.BuildEvent_EventType {
+func buildEventTypeFromActionType(atype actionType) lib.BuildEvent_EventType {
 	switch atype {
 	case Build:
-		return pb.BuildEvent_DOCKER_BUILD_STREAM
+		return lib.BuildEvent_DOCKER_BUILD_STREAM
 	case Push:
-		return pb.BuildEvent_DOCKER_PUSH_STREAM
+		return lib.BuildEvent_DOCKER_PUSH_STREAM
 	}
 	return -1 // unreachable
 }
@@ -72,10 +72,10 @@ type ImageBuildClient interface {
 
 // ImageBuildPusher describes an object that can build and push container images
 type ImageBuildPusher interface {
-	Build(context.Context, *pb.BuildRequest, gocql.UUID) (string, error)
+	Build(context.Context, *lib.BuildRequest, gocql.UUID) (string, error)
 	CleanImage(context.Context, string) error
-	PushBuildToRegistry(context.Context, *pb.BuildRequest) error
-	PushBuildToS3(context.Context, string, *pb.BuildRequest) error
+	PushBuildToRegistry(context.Context, *lib.BuildRequest) error
+	PushBuildToS3(context.Context, string, *lib.BuildRequest) error
 }
 
 type S3ErrorLogConfig struct {
@@ -126,7 +126,7 @@ func (ib *ImageBuilder) logf(ctx context.Context, msg string, params ...interfac
 	msg = fmt.Sprintf("%v: %v", id.String(), msg)
 	ib.logger.Printf(msg, params...)
 	go func() {
-		event, err := ib.getBuildEvent(ctx, pb.BuildEvent_LOG, pb.BuildEventError_NO_ERROR, fmt.Sprintf(msg, params...), false)
+		event, err := ib.getBuildEvent(ctx, lib.BuildEvent_LOG, lib.BuildEventError_NO_ERROR, fmt.Sprintf(msg, params...), false)
 		if err != nil {
 			ib.logger.Printf("error building event object: %v", err)
 			return
@@ -138,16 +138,16 @@ func (ib *ImageBuilder) logf(ctx context.Context, msg string, params ...interfac
 	}()
 }
 
-func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype pb.BuildEvent_EventType, errtype pb.BuildEventError_ErrorType, msg string, finished bool) (*pb.BuildEvent, error) {
-	var event *pb.BuildEvent
+func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype lib.BuildEvent_EventType, errtype lib.BuildEventError_ErrorType, msg string, finished bool) (*lib.BuildEvent, error) {
+	var event *lib.BuildEvent
 	id, ok := buildcontext.BuildIDFromContext(ctx)
 	if !ok {
 		return event, fmt.Errorf("build id missing from context")
 	}
-	event = &pb.BuildEvent{
-		EventError: &pb.BuildEventError{
+	event = &lib.BuildEvent{
+		EventError: &lib.BuildEventError{
 			ErrorType: errtype,
-			IsError:   errtype != pb.BuildEventError_NO_ERROR,
+			IsError:   errtype != lib.BuildEventError_NO_ERROR,
 		},
 		BuildId:       id.String(),
 		EventType:     etype,
@@ -157,7 +157,7 @@ func (ib *ImageBuilder) getBuildEvent(ctx context.Context, etype pb.BuildEvent_E
 	return event, nil
 }
 
-func (ib *ImageBuilder) event(bevent *pb.BuildEvent) {
+func (ib *ImageBuilder) event(bevent *lib.BuildEvent) {
 	ib.logger.Printf("event: %v", bevent.Message)
 	go func() {
 		err := ib.ep.PublishEvent(bevent)
@@ -190,7 +190,7 @@ func (ib ImageBuilder) validateTag(tag string) bool {
 }
 
 // Returns full docker name:tag strings from the supplied repo/tags
-func (ib *ImageBuilder) getFullImageNames(req *pb.BuildRequest) ([]string, error) {
+func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, error) {
 	var bname string
 	names := []string{}
 	if req.Push.Registry.Repo != "" {
@@ -225,7 +225,7 @@ func (ib *ImageBuilder) getFullImageNames(req *pb.BuildRequest) ([]string, error
 
 // tagCheck checks the existance of tags in the registry or the S3 object
 // returns true if build/push should be performed
-func (ib *ImageBuilder) tagCheck(req *pb.BuildRequest) (bool, error) {
+func (ib *ImageBuilder) tagCheck(req *lib.BuildRequest) (bool, error) {
 	if !req.SkipIfExists {
 		return true, nil
 	}
@@ -263,7 +263,7 @@ func (ib *ImageBuilder) tagCheck(req *pb.BuildRequest) (bool, error) {
 }
 
 // Build builds an image accourding to the request
-func (ib *ImageBuilder) Build(ctx context.Context, req *pb.BuildRequest, id gocql.UUID) (string, error) {
+func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id gocql.UUID) (string, error) {
 	ib.logf(ctx, "starting build")
 	err := ib.dl.SetBuildTimeMetric(id, "docker_build_started")
 	if err != nil {
@@ -309,7 +309,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *pb.BuildRequest, id gocq
 	return ib.dobuild(ctx, req, rbi)
 }
 
-func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, events []pb.BuildEvent) error {
+func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, events []lib.BuildEvent) error {
 	if buildcontext.IsCancelled(ctx.Done()) {
 		return fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
@@ -330,7 +330,7 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 }
 
 // saveEventLogToS3 writes a stream of events to S3 and returns the S3 HTTP URL
-func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref string, action actionType, events []pb.BuildEvent) (string, error) {
+func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref string, action actionType, events []lib.BuildEvent) (string, error) {
 	id, ok := buildcontext.BuildIDFromContext(ctx)
 	if !ok {
 		return "", fmt.Errorf("build id missing from context")
@@ -363,7 +363,7 @@ const (
 )
 
 // doBuild executes the archive file GET and triggers the Docker build
-func (ib *ImageBuilder) dobuild(ctx context.Context, req *pb.BuildRequest, rbi *RepoBuildData) (string, error) {
+func (ib *ImageBuilder) dobuild(ctx context.Context, req *lib.BuildRequest, rbi *RepoBuildData) (string, error) {
 	var imageid string
 	if buildcontext.IsCancelled(ctx.Done()) {
 		return imageid, fmt.Errorf("build was cancelled: %v", ctx.Err())
@@ -389,7 +389,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *pb.BuildRequest, rbi *
 	err2 := ib.saveOutput(ctx, Build, output) // we want to save output even if error
 	if err != nil {
 		le := output[len(output)-1]
-		if le.EventError.ErrorType == pb.BuildEventError_FATAL && ib.s3errorcfg.PushToS3 {
+		if le.EventError.ErrorType == lib.BuildEventError_FATAL && ib.s3errorcfg.PushToS3 {
 			ib.logf(ctx, "pushing failed build log to S3: %v", id.String())
 			loc, err3 := ib.saveEventLogToS3(ctx, req.Build.GithubRepo, req.Build.Ref, Build, output)
 			if err3 != nil {
@@ -463,10 +463,10 @@ type dockerErrorDetail struct {
 }
 
 // monitorDockerAction reads the Docker API response stream
-func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser, atype actionType) ([]pb.BuildEvent, error) {
+func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadCloser, atype actionType) ([]lib.BuildEvent, error) {
 	rdr := bufio.NewReader(rc)
-	output := []pb.BuildEvent{}
-	var bevent *pb.BuildEvent
+	output := []lib.BuildEvent{}
+	var bevent *lib.BuildEvent
 	for {
 		if buildcontext.IsCancelled(ctx.Done()) {
 			return output, fmt.Errorf("action was cancelled: %v", ctx.Err())
@@ -483,18 +483,18 @@ func (ib *ImageBuilder) monitorDockerAction(ctx context.Context, rc io.ReadClose
 		if err != nil {
 			return output, fmt.Errorf("error unmarshaling event: %v (event: %v)", err, string(line))
 		}
-		var errtype pb.BuildEventError_ErrorType
+		var errtype lib.BuildEventError_ErrorType
 		if event.Error != "" {
-			errtype = pb.BuildEventError_FATAL
+			errtype = lib.BuildEventError_FATAL
 		} else {
-			errtype = pb.BuildEventError_NO_ERROR
+			errtype = lib.BuildEventError_NO_ERROR
 		}
 		bevent, err = ib.getBuildEvent(ctx, buildEventTypeFromActionType(atype), errtype, string(line), false)
 		if err != nil {
 			return output, err
 		}
 		output = append(output, *bevent)
-		if errtype == pb.BuildEventError_FATAL {
+		if errtype == lib.BuildEventError_FATAL {
 			// do not push final event (leave to upstream error handler)
 			return output, fmt.Errorf("fatal error performing %v action", atype.String())
 		}
@@ -533,7 +533,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 // PushBuildToRegistry pushes the already built image and all associated tags to the
 // configured remote Docker registry. Caller must ensure the image has already
 // been built successfully
-func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *pb.BuildRequest) error {
+func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildRequest) error {
 	if buildcontext.IsCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
@@ -574,7 +574,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *pb.BuildRe
 		All:          true,
 		RegistryAuth: auth,
 	}
-	var output []pb.BuildEvent
+	var output []lib.BuildEvent
 	inames, err := ib.getFullImageNames(req)
 	if err != nil {
 		return err
@@ -614,7 +614,7 @@ func (ib *ImageBuilder) getCommitSHA(repo, ref string) (string, error) {
 }
 
 // PushBuildToS3 exports and uploads the already built image to the configured S3 bucket/key
-func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *pb.BuildRequest) error {
+func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *lib.BuildRequest) error {
 	if buildcontext.IsCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}

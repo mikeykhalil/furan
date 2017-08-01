@@ -40,7 +40,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/metadata"
@@ -62,7 +62,7 @@ func (lss *LocalServerStream) Context() context.Context {
 	return lss.ctx
 }
 
-func (lss *LocalServerStream) Send(event *pb.BuildEvent) error {
+func (lss *LocalServerStream) Send(event *lib.BuildEvent) error {
 	if !strings.HasSuffix(event.Message, "\n") {
 		event.Message += "\n"
 	}
