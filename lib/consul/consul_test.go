@@ -12,7 +12,7 @@ import (
 )
 
 var testConsulconfig = &config.Consulconfig{
-	KVPrefix: "/furan",
+	KVPrefix: "furan",
 }
 
 func TestSetBuildRunning(t *testing.T) {
