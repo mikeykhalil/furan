@@ -8,6 +8,7 @@ mockgen -package mocks github.com/dollarshaveclub/furan/lib/metrics MetricsColle
 mockgen -package mocks github.com/dollarshaveclub/furan/lib/s3 ObjectStorageManager > ./mock_object_storage_manager.go
 mockgen -package mocks github.com/dollarshaveclub/furan/lib/squasher ImageSquasher > ./mock_image_squasher.go
 mockgen -package mocks github.com/dollarshaveclub/furan/lib/tagcheck ImageTagChecker > ./mock_image_tag_checker.go
+mockgen -package mocks github.com/dollarshaveclub/furan/lib/consul ConsulKV  > ./mock_consul_kv.go
 
 # mockgen improperly inserts vendor directory into imports so we have to manually filter out
 # https://github.com/golang/mock/issues/30
