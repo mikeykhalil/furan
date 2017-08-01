@@ -20,6 +20,7 @@ import (
 	docker "github.com/docker/engine-api/client"
 	"github.com/dollarshaveclub/furan/lib/builder"
 	"github.com/dollarshaveclub/furan/lib/config"
+	"github.com/dollarshaveclub/furan/lib/consul"
 	"github.com/dollarshaveclub/furan/lib/gc"
 	"github.com/dollarshaveclub/furan/lib/github_fetch"
 	"github.com/dollarshaveclub/furan/lib/grpc"
@@ -72,6 +73,8 @@ func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.S3PresignTTL, "s3-error-log-presign-ttl", 60*24, "Presigned error log URL TTL in minutes (0 to disable)")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.GCIntervalSecs, "gc-interval", 3600, "GC (garbage collection) interval in seconds")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.DockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
+	serverCmd.PersistentFlags().StringVar(&consulConfig.Addr, "consul-addr", "127.0.0.1:8500", "Consul address (IP:port)")
+	serverCmd.PersistentFlags().StringVar(&consulConfig.KVPrefix, "consul-kv-prefix", "furan", "Consul KV prefix")
 	RootCmd.AddCommand(serverCmd)
 }
 
@@ -156,7 +159,13 @@ func server(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("error creating image builder: %v", err)
 	}
-	grpcSvr := grpc.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, serverConfig.Queuesize, serverConfig.Concurrency, logger)
+
+	kvo, err := consul.NewConsulKVOrchestrator(&consulConfig)
+	if err != nil {
+		log.Fatalf("error creating key value orchestrator: %v", err)
+	}
+
+	grpcSvr := grpc.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, kvo, serverConfig.Queuesize, serverConfig.Concurrency, logger)
 	go grpcSvr.ListenRPC(serverConfig.GRPCAddr, serverConfig.GRPCPort)
 
 	ha := httphandlers.NewHTTPAdapter(grpcSvr)
