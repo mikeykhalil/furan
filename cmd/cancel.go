@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -19,7 +19,7 @@ var cancelCmd = &cobra.Command{
 	Run:   cancel,
 }
 
-var cancelReq = &pb.BuildCancelRequest{}
+var cancelReq = &lib.BuildCancelRequest{}
 
 func init() {
 	cancelCmd.PersistentFlags().StringVar(&remoteFuranHost, "remote-host", "", "Remote Furan server with gRPC port (eg: furan.me.com:4001)")
@@ -58,7 +58,7 @@ func cancel(cmd *cobra.Command, args []string) {
 	}
 	defer conn.Close()
 
-	c := pb.NewFuranExecutorClient(conn)
+	c := lib.NewFuranExecutorClient(conn)
 
 	resp, err := c.CancelBuild(context.Background(), cancelReq)
 	if err != nil {

@@ -3,7 +3,7 @@ package datalayer_test
 import (
 	"testing"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	pb "github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/datalayer"
 )
 
