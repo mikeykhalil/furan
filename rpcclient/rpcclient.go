@@ -197,8 +197,11 @@ func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Buil
 
 	c := NewFuranExecutorClient(conn)
 
-	fc.logger.Printf("triggering build")
+	if ctx.Err() == context.Canceled {
+		return "", ErrCanceled
+	}
 
+	fc.logger.Printf("triggering build")
 	// use a new context so StartBuild won't get cancelled if
 	// ctx is cancelled
 	resp, err := c.StartBuild(context.Background(), req)
@@ -213,6 +216,16 @@ func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Buil
 	fc.logger.Printf("monitoring build: %v", resp.BuildId)
 	stream, err := c.MonitorBuild(ctx, &mreq)
 	if err != nil {
+
+		if grpc.Code(err) == codes.Canceled || err == context.Canceled {
+			creq := BuildCancelRequest{
+				BuildId: resp.BuildId,
+			}
+
+			c.CancelBuild(context.Background(), &creq) // best effort but doesn't matter if it fails
+			return resp.BuildId, ErrCanceled
+		}
+
 		return resp.BuildId, fc.rpcerr(err, "MonitorBuild")
 	}
 
