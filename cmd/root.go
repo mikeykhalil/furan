@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/config"
 	"github.com/dollarshaveclub/furan/lib/datalayer"
 	"github.com/dollarshaveclub/furan/lib/db"
@@ -27,6 +27,7 @@ var dockerConfig config.Dockerconfig
 var awsConfig config.AWSConfig
 var dbConfig config.DBconfig
 var kafkaConfig config.Kafkaconfig
+var consulConfig config.Consulconfig
 
 var nodestr string
 var datacenterstr string
@@ -38,11 +39,11 @@ var dogstatsdAddr string
 var logger *log.Logger
 
 // used by build and trigger commands
-var cliBuildRequest = pb.BuildRequest{
-	Build: &pb.BuildDefinition{},
-	Push: &pb.PushDefinition{
-		Registry: &pb.PushRegistryDefinition{},
-		S3:       &pb.PushS3Definition{},
+var cliBuildRequest = lib.BuildRequest{
+	Build: &lib.BuildDefinition{},
+	Push: &lib.PushDefinition{
+		Registry: &lib.PushRegistryDefinition{},
+		S3:       &lib.PushS3Definition{},
 	},
 }
 var tags string
