@@ -152,7 +152,7 @@ func connectToDB() {
 	dbConfig.Cluster.Keyspace = dbConfig.Keyspace
 	dbConfig.Cluster.ProtoVersion = 3
 	dbConfig.Cluster.NumConns = 20
-	dbConfig.Cluster.Timeout = 1 * time.Second
+	dbConfig.Cluster.Timeout = 10 * time.Second
 	dbConfig.Cluster.SocketKeepalive = 30 * time.Second
 }
 
