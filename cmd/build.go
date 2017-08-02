@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	docker "github.com/docker/engine-api/client"
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/builder"
 	"github.com/dollarshaveclub/furan/lib/github_fetch"
 	"github.com/dollarshaveclub/furan/lib/grpc"
@@ -151,7 +151,7 @@ func build(cmd *cobra.Command, args []string) {
 
 	fmt.Fprintf(os.Stdout, "build id: %v\n", resp.BuildId)
 
-	req := &pb.BuildStatusRequest{
+	req := &lib.BuildStatusRequest{
 		BuildId: resp.BuildId,
 	}
 

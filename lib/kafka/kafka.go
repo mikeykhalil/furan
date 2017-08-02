@@ -8,7 +8,7 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/metrics"
 	"github.com/gocql/gocql"
 	"github.com/golang/protobuf/proto"
@@ -25,12 +25,12 @@ var kafkaVersion = sarama.V0_10_0_0
 
 // EventBusProducer describes an object capable of publishing events somewhere
 type EventBusProducer interface {
-	PublishEvent(*pb.BuildEvent) error
+	PublishEvent(*lib.BuildEvent) error
 }
 
 // EventBusConsumer describes an object cabable of subscribing to events somewhere
 type EventBusConsumer interface {
-	SubscribeToTopic(chan<- *pb.BuildEvent, <-chan struct{}, gocql.UUID) error
+	SubscribeToTopic(chan<- *lib.BuildEvent, <-chan struct{}, gocql.UUID) error
 }
 
 // EventBusManager describes an object that can publish and subscribe to events somewhere
@@ -96,7 +96,7 @@ func (kp *KafkaManager) handlePErrors() {
 }
 
 // PublishEvent publishes a build event to the configured Kafka topic
-func (kp *KafkaManager) PublishEvent(event *pb.BuildEvent) error {
+func (kp *KafkaManager) PublishEvent(event *lib.BuildEvent) error {
 	id, err := gocql.ParseUUID(event.BuildId)
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func (kp *KafkaManager) PublishEvent(event *pb.BuildEvent) error {
 // SubscribeToTopic listens to the configured topic, filters by build_id and writes
 // the resulting messages to output. When the subscribed build is finished
 // output is closed. done is a signal from the caller to abort the stream subscription
-func (kp *KafkaManager) SubscribeToTopic(output chan<- *pb.BuildEvent, done <-chan struct{}, buildID gocql.UUID) error {
+func (kp *KafkaManager) SubscribeToTopic(output chan<- *lib.BuildEvent, done <-chan struct{}, buildID gocql.UUID) error {
 	// random group ID for each connection
 	groupid, err := gocql.RandomUUID()
 	if err != nil {
@@ -149,7 +149,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *pb.BuildEvent, done <-ch
 		defer con.Close()
 		var err error
 		var msg *sarama.ConsumerMessage
-		var event *pb.BuildEvent
+		var event *lib.BuildEvent
 		input := con.Messages()
 		for {
 			select {
@@ -164,7 +164,7 @@ func (kp *KafkaManager) SubscribeToTopic(output chan<- *pb.BuildEvent, done <-ch
 				return
 			}
 			if bytes.Equal(msg.Key, []byte(buildID[:])) {
-				event = &pb.BuildEvent{}
+				event = &lib.BuildEvent{}
 				err = proto.Unmarshal(msg.Value, event)
 				if err != nil {
 					kp.logger.Printf("%v: error unmarshaling event from Kafka stream: %v", buildID.String(), err)
