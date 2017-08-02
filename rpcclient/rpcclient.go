@@ -6,6 +6,7 @@ It uses Consul service discovery to pick a random node.
 package rpcclient
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/codes"
 
 	"google.golang.org/grpc"
 
@@ -24,6 +27,9 @@ import (
 const (
 	connTimeoutSecs = 30
 )
+
+// ErrCanceled is an error returned by Build() when the build has been canceled
+var ErrCanceled = errors.New("build canceled")
 
 //go:generate stringer -type=NodeSelectionStrategy
 
@@ -192,6 +198,9 @@ func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Buil
 	c := NewFuranExecutorClient(conn)
 
 	fc.logger.Printf("triggering build")
+
+	// use a new context so StartBuild won't get cancelled if
+	// ctx is cancelled
 	resp, err := c.StartBuild(context.Background(), req)
 	if err != nil {
 		return "", fc.rpcerr(err, "StartBuild")
@@ -202,7 +211,7 @@ func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Buil
 	}
 
 	fc.logger.Printf("monitoring build: %v", resp.BuildId)
-	stream, err := c.MonitorBuild(context.Background(), &mreq)
+	stream, err := c.MonitorBuild(ctx, &mreq)
 	if err != nil {
 		return resp.BuildId, fc.rpcerr(err, "MonitorBuild")
 	}
@@ -213,6 +222,16 @@ func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *Buil
 			if err == io.EOF {
 				break
 			}
+
+			if grpc.Code(err) == codes.Canceled || err == context.Canceled {
+				creq := BuildCancelRequest{
+					BuildId: resp.BuildId,
+				}
+
+				c.CancelBuild(context.Background(), &creq) // best effort but doesn't matter if it fails
+				return resp.BuildId, ErrCanceled
+			}
+
 			return resp.BuildId, fc.rpcerr(err, "stream.Recv")
 		}
 		out <- event
