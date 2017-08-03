@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/AlternativaPlatform/docker-registry-client"
+  packages = ["registry"]
+  revision = "57a5cfd72ba9bc9639da01018465d2b9eef8a533"
+
+[[projects]]
   name = "github.com/DataDog/datadog-go"
   packages = ["statsd"]
   revision = "0ddda6bee21174ef6c4873647cb0d6ec9cba996f"
@@ -219,12 +225,6 @@
 
 [[projects]]
   branch = "master"
-  name = "github.com/heroku/docker-registry-client"
-  packages = ["registry"]
-  revision = "95467b6cacee2a06f112a3cf7e47a70fad6000cf"
-
-[[projects]]
-  branch = "master"
   name = "github.com/inconshreveable/mousetrap"
   packages = ["."]
   revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
@@ -340,6 +340,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "d70c5d6ad6553a590c215f591a43a6bb0cfcc593b674f013c8a4d53d6771205f"
+  inputs-digest = "9bc314ff29d799a83e7c0554443d793351d058b035b89ef662ef238ad76f2e41"
   solver-name = "gps-cdcl"
   solver-version = 1

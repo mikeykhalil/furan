@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/AlternativaPlatform/docker-registry-client/registry"
 	"github.com/dollarshaveclub/furan/lib/config"
 	"github.com/dollarshaveclub/go-lib/set"
-	"github.com/heroku/docker-registry-client/registry"
 )
 
 // ImageTagChecker describes an object that can see if a tag exists for an image in a registry
