@@ -28,6 +28,10 @@ services:
       - "8200:8200"
     volumes:
       - "$PWD/local_dev_secrets.json:/opt/secrets.json"
+  consul:
+    image: consul
+    ports:
+      - "8500:8500"
   furan:
     build: .
     image: furan:local
@@ -48,6 +52,7 @@ services:
       - scylla
       - vault
       - docker
+      - consul
     healthcheck:
       test: echo 'GET /' |nc localhost 4002
       interval: 25s

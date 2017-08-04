@@ -77,3 +77,8 @@ type Serverconfig struct {
 	GCIntervalSecs      uint
 	DockerDiskPath      string
 }
+
+type Consulconfig struct {
+	Addr     string
+	KVPrefix string
+}

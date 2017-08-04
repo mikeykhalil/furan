@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	dtypes "github.com/docker/engine-api/types"
-	"github.com/dollarshaveclub/furan/generated/pb"
+	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/mocks"
 	"github.com/gocql/gocql"
 	"github.com/golang/mock/gomock"
@@ -60,15 +60,15 @@ func TestImageBuildTagCheckRegistrySkip(t *testing.T) {
 	deps.mcf.EXPECT().GetCommitSHA("dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
 	deps.mitc.EXPECT().AllTagsExist([]string{"master"}, "quay.io/dollarshaveclub/furan").Times(1).Return(true, nil, nil)
 
-	req := &pb.BuildRequest{
+	req := &lib.BuildRequest{
 		SkipIfExists: true,
-		Build: &pb.BuildDefinition{
+		Build: &lib.BuildDefinition{
 			GithubRepo: "dollarshaveclub/furan",
 			Ref:        "master",
 			Tags:       []string{"master"},
 		},
-		Push: &pb.PushDefinition{
-			Registry: &pb.PushRegistryDefinition{
+		Push: &lib.PushDefinition{
+			Registry: &lib.PushRegistryDefinition{
 				Repo: "quay.io/dollarshaveclub/furan",
 			},
 		},
@@ -94,16 +94,16 @@ func TestImageBuildTagCheckS3Skip(t *testing.T) {
 	deps.mcf.EXPECT().GetCommitSHA("dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
 	deps.mosm.EXPECT().Exists(gomock.Any(), gomock.Any()).Times(1).Return(true, nil)
 
-	req := &pb.BuildRequest{
+	req := &lib.BuildRequest{
 		SkipIfExists: true,
-		Build: &pb.BuildDefinition{
+		Build: &lib.BuildDefinition{
 			GithubRepo: "dollarshaveclub/furan",
 			Ref:        "master",
 			Tags:       []string{"master"},
 		},
-		Push: &pb.PushDefinition{
-			Registry: &pb.PushRegistryDefinition{},
-			S3: &pb.PushS3Definition{
+		Push: &lib.PushDefinition{
+			Registry: &lib.PushRegistryDefinition{},
+			S3: &lib.PushS3Definition{
 				Region:    "us-west-2",
 				Bucket:    "foo",
 				KeyPrefix: "bar",

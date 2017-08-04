@@ -27,6 +27,7 @@ var dockerConfig config.Dockerconfig
 var awsConfig config.AWSConfig
 var dbConfig config.DBconfig
 var kafkaConfig config.Kafkaconfig
+var consulConfig config.Consulconfig
 
 var nodestr string
 var datacenterstr string

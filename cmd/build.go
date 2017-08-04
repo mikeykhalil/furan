@@ -10,6 +10,7 @@ import (
 	docker "github.com/docker/engine-api/client"
 	"github.com/dollarshaveclub/furan/generated/lib"
 	"github.com/dollarshaveclub/furan/lib/builder"
+	"github.com/dollarshaveclub/furan/lib/consul"
 	"github.com/dollarshaveclub/furan/lib/github_fetch"
 	"github.com/dollarshaveclub/furan/lib/grpc"
 	"github.com/dollarshaveclub/furan/lib/metrics"
@@ -66,6 +67,8 @@ func init() {
 	buildCmd.PersistentFlags().StringVar(&buildS3ErrorLogRegion, "s3-error-log-region", "us-west-2", "Region for S3 error log upload")
 	buildCmd.PersistentFlags().StringVar(&buildS3ErrorLogBucket, "s3-error-log-bucket", "", "Bucket for S3 error log upload")
 	buildCmd.PersistentFlags().UintVar(&buildS3ErrorLogsPresignTTL, "s3-error-log-presign-ttl", 60*4, "Presigned error log URL TTL in minutes (0 to disable)")
+	buildCmd.PersistentFlags().StringVar(&consulConfig.Addr, "consul-addr", "127.0.0.1:8500", "Consul address (IP:port)")
+	buildCmd.PersistentFlags().StringVar(&consulConfig.KVPrefix, "consul-kv-prefix", "furan", "Consul KV prefix")
 	RootCmd.AddCommand(buildCmd)
 }
 
@@ -140,9 +143,14 @@ func build(cmd *cobra.Command, args []string) {
 		clierr("error creating image builder: %v", err)
 	}
 
+	kvo, err := consul.NewConsulKVOrchestrator(&consulConfig)
+	if err != nil {
+		clierr("error creating key value orchestrator: %v", err)
+	}
+
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	gs := grpc.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, 1, 1, logger)
+	gs := grpc.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, kvo, 1, 1, logger)
 
 	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
 	if err != nil {
