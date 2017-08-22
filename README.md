@@ -1,3 +1,5 @@
+[![Go Report Card](https://goreportcard.com/badge/github.com/dollarshaveclub/furan)](https://goreportcard.com/report/github.com/dollarshaveclub/furan)
+
 <p align="center">
 <img with="304" height="300" src="https://s3-us-west-2.amazonaws.com/s.cdpn.io/12437/furan_icon.svg" alt="Furan" />
 </p>
