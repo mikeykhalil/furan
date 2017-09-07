@@ -69,7 +69,7 @@ func init() {
 	buildCmd.PersistentFlags().UintVar(&buildS3ErrorLogsPresignTTL, "s3-error-log-presign-ttl", 60*4, "Presigned error log URL TTL in minutes (0 to disable)")
 	buildCmd.PersistentFlags().StringVar(&consulConfig.Addr, "consul-addr", "127.0.0.1:8500", "Consul address (IP:port)")
 	buildCmd.PersistentFlags().StringVar(&consulConfig.KVPrefix, "consul-kv-prefix", "furan", "Consul KV prefix")
-	buildCmd.PersistentFlags().StringSliceVar(&buildArgs, "build-arg", nil, "Build arg to use for build request")
+	buildCmd.PersistentFlags().StringSliceVar(&buildArgs, "build-arg", []string{}, "Build arg to use for build request")
 	RootCmd.AddCommand(buildCmd)
 }
 
@@ -92,7 +92,6 @@ func validateCLIBuildRequest() {
 }
 
 func buildArgsFromSlice(args []string) map[string]string {
-	fmt.Println(args)
 	buildArgs := make(map[string]string)
 	for _, arg := range args {
 		kv := strings.Split(arg, "=")
@@ -102,7 +101,6 @@ func buildArgsFromSlice(args []string) map[string]string {
 
 		buildArgs[kv[0]] = kv[1]
 	}
-	fmt.Println(buildArgs)
 	return buildArgs
 }
 
