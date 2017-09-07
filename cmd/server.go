@@ -79,6 +79,7 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&consulConfig.KVPrefix, "consul-kv-prefix", "furan", "Consul KV prefix")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.NewRelicApp, "newrelic-app", "furan", "New Relic application name")
 	serverCmd.PersistentFlags().BoolVar(&serverConfig.EnableNewRelic, "enable-newrelic", true, "Enable New Relic APM")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.NewRelicAPIKeyVaultPath, "newrelic-api-key-path", "/newrelic/api_key", "New Relic API key Vault path")
 	RootCmd.AddCommand(serverCmd)
 }
 
