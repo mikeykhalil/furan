@@ -44,7 +44,7 @@ func vaultPath(vaultConfig *config.Vaultconfig, path string) string {
 }
 
 // SetupVault does generic Vault setup (all subcommands)
-func SetupVault(vaultConfig *config.Vaultconfig, awsConfig *config.AWSConfig, dockerConfig *config.Dockerconfig, gitConfig *config.Gitconfig, awscredsprefix string) {
+func SetupVault(vaultConfig *config.Vaultconfig, awsConfig *config.AWSConfig, dockerConfig *config.Dockerconfig, gitConfig *config.Gitconfig, serverConfig *config.Serverconfig, awscredsprefix string) {
 	vc, err := getVaultClient(vaultConfig)
 	if err != nil {
 		log.Fatalf("Error creating Vault client: %v", err)
@@ -57,8 +57,13 @@ func SetupVault(vaultConfig *config.Vaultconfig, awsConfig *config.AWSConfig, do
 	if err != nil {
 		log.Fatalf("Error getting dockercfg: %v", err)
 	}
+	nrkey, err := vc.GetValue(vaultPath(vaultConfig, serverConfig.NewRelicAPIKeyVaultPath))
+	if err != nil {
+		log.Fatalf("Error getting New Relic API key: %v", err)
+	}
 	gitConfig.Token = safeStringCast(ght)
 	dockerConfig.DockercfgRaw = safeStringCast(dcc)
+	serverConfig.NewRelicAPIKey = safeStringCast(nrkey)
 	ak, sk := GetAWSCreds(vaultConfig, awscredsprefix)
 	awsConfig.AccessKeyID = ak
 	awsConfig.SecretAccessKey = sk

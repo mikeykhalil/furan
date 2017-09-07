@@ -50,7 +50,7 @@ DOCKER_CERT_PATH`,
 		if s3PullOpts.commitsha == "" {
 			clierr("Commit SHA is required")
 		}
-		vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+		vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, &serverConfig, awscredsprefix)
 		vault.GetAWSCreds(&vaultConfig, awscredsprefix)
 	},
 	Run: s3pull,

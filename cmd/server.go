@@ -27,11 +27,13 @@ import (
 	"github.com/dollarshaveclub/furan/lib/httphandlers"
 	flogger "github.com/dollarshaveclub/furan/lib/logger"
 	"github.com/dollarshaveclub/furan/lib/metrics"
+	"github.com/dollarshaveclub/furan/lib/mocks"
 	"github.com/dollarshaveclub/furan/lib/s3"
 	"github.com/dollarshaveclub/furan/lib/squasher"
 	"github.com/dollarshaveclub/furan/lib/tagcheck"
 	"github.com/dollarshaveclub/furan/lib/vault"
 	"github.com/gorilla/mux"
+	newrelic "github.com/newrelic/go-agent"
 	"github.com/spf13/cobra"
 )
 
@@ -75,6 +77,8 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverConfig.DockerDiskPath, "docker-storage-path", "/var/lib/docker", "Path to Docker storage for monitoring free space (optional)")
 	serverCmd.PersistentFlags().StringVar(&consulConfig.Addr, "consul-addr", "127.0.0.1:8500", "Consul address (IP:port)")
 	serverCmd.PersistentFlags().StringVar(&consulConfig.KVPrefix, "consul-kv-prefix", "furan", "Consul KV prefix")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.NewRelicApp, "newrelic-app", "furan", "New Relic application name")
+	serverCmd.PersistentFlags().BoolVar(&serverConfig.EnableNewRelic, "enable-newrelic", true, "Enable New Relic APM")
 	RootCmd.AddCommand(serverCmd)
 }
 
@@ -122,10 +126,25 @@ func startGC(dc builder.ImageBuildClient, mc metrics.MetricsCollector, log *log.
 }
 
 func server(cmd *cobra.Command, args []string) {
-	vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+	var err error
+
+	vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, &serverConfig, awscredsprefix)
 	if serverConfig.LogToSumo {
 		vault.GetSumoURL(&vaultConfig, &serverConfig)
 	}
+
+	var nrapp newrelic.Application
+	var nrconfig newrelic.Config
+	if serverConfig.EnableNewRelic {
+		nrconfig = newrelic.NewConfig(serverConfig.NewRelicApp, serverConfig.NewRelicAPIKey)
+		nrapp, err = newrelic.NewApplication(nrconfig)
+		if err != nil {
+			log.Fatalf("error setting up new relic: %v", err)
+		}
+	} else {
+		nrapp = mocks.NullNewRelicApp{}
+	}
+
 	setupServerLogger()
 	setupDB(initializeDB)
 	mc, err := metrics.NewDatadogCollector(dogstatsdAddr)
@@ -165,7 +184,7 @@ func server(cmd *cobra.Command, args []string) {
 		log.Fatalf("error creating key value orchestrator: %v", err)
 	}
 
-	grpcSvr := grpc.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, kvo, serverConfig.Queuesize, serverConfig.Concurrency, logger)
+	grpcSvr := grpc.NewGRPCServer(imageBuilder, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, kvo, serverConfig.Queuesize, serverConfig.Concurrency, logger, nrapp)
 	go grpcSvr.ListenRPC(serverConfig.GRPCAddr, serverConfig.GRPCPort)
 
 	ha := httphandlers.NewHTTPAdapter(grpcSvr)

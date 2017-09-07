@@ -9,6 +9,7 @@ import (
 
 	dtypes "github.com/docker/engine-api/types"
 	"github.com/dollarshaveclub/furan/generated/lib"
+	"github.com/dollarshaveclub/furan/lib/buildcontext"
 	"github.com/dollarshaveclub/furan/lib/mocks"
 	"github.com/gocql/gocql"
 	"github.com/golang/mock/gomock"
@@ -53,12 +54,13 @@ func TestImageBuildTagCheckRegistrySkip(t *testing.T) {
 	ibp, deps, ctrl := getTestImageBuildPusher(t)
 	defer ctrl.Finish()
 
-	ctx := context.Background()
 	id, _ := gocql.RandomUUID()
+	ctx := buildcontext.NewBuildIDContext(context.Background(), id, &mocks.NullNewRelicTxn{})
 
-	deps.mdl.EXPECT().SetBuildTimeMetric(id, gomock.Any()).Times(1)
+	deps.mdl.EXPECT().SetBuildTimeMetric(gomock.Any(), id, gomock.Any()).Times(1)
 	deps.mcf.EXPECT().GetCommitSHA("dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
 	deps.mitc.EXPECT().AllTagsExist([]string{"master"}, "quay.io/dollarshaveclub/furan").Times(1).Return(true, nil, nil)
+	deps.mebp.EXPECT().PublishEvent(gomock.Any()).AnyTimes()
 
 	req := &lib.BuildRequest{
 		SkipIfExists: true,
@@ -87,10 +89,10 @@ func TestImageBuildTagCheckS3Skip(t *testing.T) {
 	ibp, deps, ctrl := getTestImageBuildPusher(t)
 	defer ctrl.Finish()
 
-	ctx := context.Background()
 	id, _ := gocql.RandomUUID()
+	ctx := buildcontext.NewBuildIDContext(context.Background(), id, &mocks.NullNewRelicTxn{})
 
-	deps.mdl.EXPECT().SetBuildTimeMetric(id, gomock.Any()).Times(1)
+	deps.mdl.EXPECT().SetBuildTimeMetric(gomock.Any(), id, gomock.Any()).Times(1)
 	deps.mcf.EXPECT().GetCommitSHA("dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
 	deps.mosm.EXPECT().Exists(gomock.Any(), gomock.Any()).Times(1).Return(true, nil)
 
