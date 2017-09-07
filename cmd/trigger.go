@@ -49,7 +49,7 @@ func init() {
 	triggerCmd.PersistentFlags().StringVar(&tags, "tags", "master", "image tags (optional, comma-delimited)")
 	triggerCmd.PersistentFlags().BoolVar(&cliBuildRequest.Build.TagWithCommitSha, "tag-sha", false, "additionally tag with git commit SHA (optional)")
 	triggerCmd.PersistentFlags().BoolVar(&cliBuildRequest.SkipIfExists, "skip-if-exists", false, "if build already exists at destination, skip build/push (registry: all tags exist, s3: object exists)")
-	triggerCmd.PersistentFlags().StringSliceVar(&buildArgs, "build-arg", nil, "Build arg to use for build request")
+	triggerCmd.PersistentFlags().StringSliceVar(&buildArgs, "build-arg", []string{}, "Build arg to use for build request")
 	triggerCmd.PersistentFlags().BoolVar(&monitorBuild, "monitor", true, "Monitor build after triggering")
 	RootCmd.AddCommand(triggerCmd)
 }
