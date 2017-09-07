@@ -39,7 +39,7 @@ services:
       - VAULT_TOKEN=root
       - VAULT_ADDR=http://vault:8200
       - DOCKER_HOST=tcp://docker:2375
-    command: /go/bin/furan -k -i -n scylla -f kafka:9092 server --log-to-sumo=false --consul-addr consul:8500 --enable-newrelic=true --newrelic-app furan-local
+    command: /go/bin/furan -k -i -n scylla -f kafka:9092 server --log-to-sumo=false --consul-addr consul:8500 --enable-newrelic=false --newrelic-app furan-local
     restart: always
     ports:
       - "4000:4000"
