@@ -58,7 +58,7 @@ func TestImageBuildTagCheckRegistrySkip(t *testing.T) {
 	ctx := buildcontext.NewBuildIDContext(context.Background(), id, &mocks.NullNewRelicTxn{})
 
 	deps.mdl.EXPECT().SetBuildTimeMetric(gomock.Any(), id, gomock.Any()).Times(1)
-	deps.mcf.EXPECT().GetCommitSHA("dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
+	deps.mcf.EXPECT().GetCommitSHA(gomock.Any(), "dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
 	deps.mitc.EXPECT().AllTagsExist([]string{"master"}, "quay.io/dollarshaveclub/furan").Times(1).Return(true, nil, nil)
 	deps.mebp.EXPECT().PublishEvent(gomock.Any()).AnyTimes()
 
@@ -93,7 +93,7 @@ func TestImageBuildTagCheckS3Skip(t *testing.T) {
 	ctx := buildcontext.NewBuildIDContext(context.Background(), id, &mocks.NullNewRelicTxn{})
 
 	deps.mdl.EXPECT().SetBuildTimeMetric(gomock.Any(), id, gomock.Any()).Times(1)
-	deps.mcf.EXPECT().GetCommitSHA("dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
+	deps.mcf.EXPECT().GetCommitSHA(gomock.Any(), "dollarshaveclub", "furan", "master").Return("asdf1234", nil).Times(1)
 	deps.mosm.EXPECT().Exists(gomock.Any(), gomock.Any()).Times(1).Return(true, nil)
 
 	req := &lib.BuildRequest{

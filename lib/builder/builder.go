@@ -190,7 +190,7 @@ func (ib ImageBuilder) validateTag(tag string) bool {
 }
 
 // Returns full docker name:tag strings from the supplied repo/tags
-func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, error) {
+func (ib *ImageBuilder) getFullImageNames(ctx context.Context, req *lib.BuildRequest) ([]string, error) {
 	var bname string
 	names := []string{}
 	if req.Push.Registry.Repo != "" {
@@ -211,7 +211,7 @@ func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, erro
 		names = append(names, fmt.Sprintf("%v:%v", bname, ft))
 	}
 	if req.Build.TagWithCommitSha {
-		csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+		csha, err := ib.getCommitSHA(ctx, req.Build.GithubRepo, req.Build.Ref)
 		if err != nil {
 			return names, fmt.Errorf("error getting commit sha: %v", err)
 		}
@@ -225,11 +225,11 @@ func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, erro
 
 // tagCheck checks the existance of tags in the registry or the S3 object
 // returns true if build/push should be performed
-func (ib *ImageBuilder) tagCheck(req *lib.BuildRequest) (bool, error) {
+func (ib *ImageBuilder) tagCheck(ctx context.Context, req *lib.BuildRequest) (bool, error) {
 	if !req.SkipIfExists {
 		return true, nil
 	}
-	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+	csha, err := ib.getCommitSHA(ctx, req.Build.GithubRepo, req.Build.Ref)
 	if err != nil {
 		return false, fmt.Errorf("error getting latest commit SHA: %v", err)
 	}
@@ -277,7 +277,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id goc
 	if len(rl) != 2 {
 		return "", fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
 	}
-	ok, err = ib.tagCheck(req)
+	ok, err = ib.tagCheck(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("error checking if tags/object exist: %v", err)
 	}
@@ -290,7 +290,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id goc
 		return "", fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
 	ib.logf(ctx, "fetching github repo: %v", req.Build.GithubRepo)
-	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
+	contents, err := ib.gf.Get(txn, owner, repo, req.Build.Ref)
 	if err != nil {
 		return "", fmt.Errorf("error fetching repo: %v", err)
 	}
@@ -300,7 +300,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id goc
 	} else {
 		dp = req.Build.DockerfilePath
 	}
-	inames, err := ib.getFullImageNames(req)
+	inames, err := ib.getFullImageNames(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("error getting full image names: %v", err)
 	}
@@ -343,7 +343,7 @@ func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref s
 	if !ok {
 		return "", fmt.Errorf("build id missing from context")
 	}
-	csha, err := ib.getCommitSHA(repo, ref)
+	csha, err := ib.getCommitSHA(ctx, repo, ref)
 	if err != nil {
 		return "", err
 	}
@@ -599,7 +599,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildR
 		RegistryAuth: auth,
 	}
 	var output []lib.BuildEvent
-	inames, err := ib.getFullImageNames(req)
+	inames, err := ib.getFullImageNames(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -625,12 +625,16 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildR
 	return ib.saveOutput(ctx, Push, output)
 }
 
-func (ib *ImageBuilder) getCommitSHA(repo, ref string) (string, error) {
+func (ib *ImageBuilder) getCommitSHA(ctx context.Context, repo, ref string) (string, error) {
 	rl := strings.Split(repo, "/")
 	if len(rl) != 2 {
 		return "", fmt.Errorf("malformed GitHub repo: %v", repo)
 	}
-	csha, err := ib.gf.GetCommitSHA(rl[0], rl[1], ref)
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("New Relic transaction missing from context")
+	}
+	csha, err := ib.gf.GetCommitSHA(txn, rl[0], rl[1], ref)
 	if err != nil {
 		return "", fmt.Errorf("error getting commit SHA: %v", err)
 	}
@@ -642,7 +646,7 @@ func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *
 	if buildcontext.IsCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
-	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+	csha, err := ib.getCommitSHA(ctx, req.Build.GithubRepo, req.Build.Ref)
 	if err != nil {
 		return err
 	}

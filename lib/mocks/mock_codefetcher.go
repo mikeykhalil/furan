@@ -5,6 +5,7 @@ package mocks
 
 import (
 	gomock "github.com/golang/mock/gomock"
+	go_agent "github.com/newrelic/go-agent"
 	io "io"
 )
 
@@ -29,24 +30,24 @@ func (_m *MockCodeFetcher) EXPECT() *_MockCodeFetcherRecorder {
 	return _m.recorder
 }
 
-func (_m *MockCodeFetcher) Get(_param0 string, _param1 string, _param2 string) (io.Reader, error) {
-	ret := _m.ctrl.Call(_m, "Get", _param0, _param1, _param2)
+func (_m *MockCodeFetcher) Get(_param0 go_agent.Transaction, _param1 string, _param2 string, _param3 string) (io.Reader, error) {
+	ret := _m.ctrl.Call(_m, "Get", _param0, _param1, _param2, _param3)
 	ret0, _ := ret[0].(io.Reader)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-func (_mr *_MockCodeFetcherRecorder) Get(arg0, arg1, arg2 interface{}) *gomock.Call {
-	return _mr.mock.ctrl.RecordCall(_mr.mock, "Get", arg0, arg1, arg2)
+func (_mr *_MockCodeFetcherRecorder) Get(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "Get", arg0, arg1, arg2, arg3)
 }
 
-func (_m *MockCodeFetcher) GetCommitSHA(_param0 string, _param1 string, _param2 string) (string, error) {
-	ret := _m.ctrl.Call(_m, "GetCommitSHA", _param0, _param1, _param2)
+func (_m *MockCodeFetcher) GetCommitSHA(_param0 go_agent.Transaction, _param1 string, _param2 string, _param3 string) (string, error) {
+	ret := _m.ctrl.Call(_m, "GetCommitSHA", _param0, _param1, _param2, _param3)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-func (_mr *_MockCodeFetcherRecorder) GetCommitSHA(arg0, arg1, arg2 interface{}) *gomock.Call {
-	return _mr.mock.ctrl.RecordCall(_mr.mock, "GetCommitSHA", arg0, arg1, arg2)
+func (_mr *_MockCodeFetcherRecorder) GetCommitSHA(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "GetCommitSHA", arg0, arg1, arg2, arg3)
 }
