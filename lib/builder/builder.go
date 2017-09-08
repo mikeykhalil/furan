@@ -190,7 +190,7 @@ func (ib ImageBuilder) validateTag(tag string) bool {
 }
 
 // Returns full docker name:tag strings from the supplied repo/tags
-func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, error) {
+func (ib *ImageBuilder) getFullImageNames(ctx context.Context, req *lib.BuildRequest) ([]string, error) {
 	var bname string
 	names := []string{}
 	if req.Push.Registry.Repo != "" {
@@ -211,7 +211,7 @@ func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, erro
 		names = append(names, fmt.Sprintf("%v:%v", bname, ft))
 	}
 	if req.Build.TagWithCommitSha {
-		csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+		csha, err := ib.getCommitSHA(ctx, req.Build.GithubRepo, req.Build.Ref)
 		if err != nil {
 			return names, fmt.Errorf("error getting commit sha: %v", err)
 		}
@@ -225,11 +225,11 @@ func (ib *ImageBuilder) getFullImageNames(req *lib.BuildRequest) ([]string, erro
 
 // tagCheck checks the existance of tags in the registry or the S3 object
 // returns true if build/push should be performed
-func (ib *ImageBuilder) tagCheck(req *lib.BuildRequest) (bool, error) {
+func (ib *ImageBuilder) tagCheck(ctx context.Context, req *lib.BuildRequest) (bool, error) {
 	if !req.SkipIfExists {
 		return true, nil
 	}
-	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+	csha, err := ib.getCommitSHA(ctx, req.Build.GithubRepo, req.Build.Ref)
 	if err != nil {
 		return false, fmt.Errorf("error getting latest commit SHA: %v", err)
 	}
@@ -265,7 +265,11 @@ func (ib *ImageBuilder) tagCheck(req *lib.BuildRequest) (bool, error) {
 // Build builds an image accourding to the request
 func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id gocql.UUID) (string, error) {
 	ib.logf(ctx, "starting build")
-	err := ib.dl.SetBuildTimeMetric(id, "docker_build_started")
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("New Relic transaction missing from context")
+	}
+	err := ib.dl.SetBuildTimeMetric(txn, id, "docker_build_started")
 	if err != nil {
 		return "", fmt.Errorf("error setting build time metric in DB: %v", err)
 	}
@@ -273,7 +277,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id goc
 	if len(rl) != 2 {
 		return "", fmt.Errorf("malformed github repo: %v", req.Build.GithubRepo)
 	}
-	ok, err := ib.tagCheck(req)
+	ok, err = ib.tagCheck(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("error checking if tags/object exist: %v", err)
 	}
@@ -286,7 +290,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id goc
 		return "", fmt.Errorf("build was cancelled: %v", ctx.Err())
 	}
 	ib.logf(ctx, "fetching github repo: %v", req.Build.GithubRepo)
-	contents, err := ib.gf.Get(owner, repo, req.Build.Ref)
+	contents, err := ib.gf.Get(txn, owner, repo, req.Build.Ref)
 	if err != nil {
 		return "", fmt.Errorf("error fetching repo: %v", err)
 	}
@@ -296,7 +300,7 @@ func (ib *ImageBuilder) Build(ctx context.Context, req *lib.BuildRequest, id goc
 	} else {
 		dp = req.Build.DockerfilePath
 	}
-	inames, err := ib.getFullImageNames(req)
+	inames, err := ib.getFullImageNames(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("error getting full image names: %v", err)
 	}
@@ -317,6 +321,10 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("New Relic transaction missing from context")
+	}
 	var column string
 	switch action {
 	case Build:
@@ -326,7 +334,7 @@ func (ib *ImageBuilder) saveOutput(ctx context.Context, action actionType, event
 	default:
 		return fmt.Errorf("unknown action: %v", action)
 	}
-	return ib.dl.SaveBuildOutput(id, events, column)
+	return ib.dl.SaveBuildOutput(txn, id, events, column)
 }
 
 // saveEventLogToS3 writes a stream of events to S3 and returns the S3 HTTP URL
@@ -335,7 +343,7 @@ func (ib *ImageBuilder) saveEventLogToS3(ctx context.Context, repo string, ref s
 	if !ok {
 		return "", fmt.Errorf("build id missing from context")
 	}
-	csha, err := ib.getCommitSHA(repo, ref)
+	csha, err := ib.getCommitSHA(ctx, repo, ref)
 	if err != nil {
 		return "", err
 	}
@@ -371,6 +379,10 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *lib.BuildRequest, rbi 
 	id, ok := buildcontext.BuildIDFromContext(ctx)
 	if !ok {
 		return imageid, fmt.Errorf("build id missing from context")
+	}
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return imageid, fmt.Errorf("New Relic transaction missing from context")
 	}
 	opts := dtypes.ImageBuildOptions{
 		Tags:        rbi.Tags,
@@ -414,7 +426,7 @@ func (ib *ImageBuilder) dobuild(ctx context.Context, req *lib.BuildRequest, rbi 
 		if strings.HasPrefix(dse.Stream, buildSuccessEventPrefix) {
 			imageid = strings.TrimRight(dse.Stream[len(buildSuccessEventPrefix):len(dse.Stream)], "\n")
 			ib.logf(ctx, "built image ID %v", imageid)
-			err = ib.dl.SetBuildTimeMetric(id, "docker_build_completed")
+			err = ib.dl.SetBuildTimeMetric(txn, id, "docker_build_completed")
 			if err != nil {
 				return imageid, err
 			}
@@ -432,6 +444,10 @@ func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("New Relic transaction missing from context")
+	}
 	res, _, err := ib.c.ImageInspectWithRaw(ctx, imageid)
 	if err != nil {
 		return err
@@ -440,7 +456,7 @@ func (ib *ImageBuilder) writeDockerImageSizeMetrics(ctx context.Context, imageid
 	if err != nil {
 		ib.logger.Printf("error pushing image size metrics: %v", err)
 	}
-	return ib.dl.SetDockerImageSizesMetric(id, res.Size, res.VirtualSize)
+	return ib.dl.SetDockerImageSizesMetric(txn, id, res.Size, res.VirtualSize)
 }
 
 // Models for the JSON objects the Docker API returns
@@ -511,8 +527,12 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("New Relic transaction missing from context")
+	}
 	ib.logf(ctx, "cleaning up images")
-	err := ib.dl.SetBuildTimeMetric(id, "clean_started")
+	err := ib.dl.SetBuildTimeMetric(txn, id, "clean_started")
 	if err != nil {
 		return err
 	}
@@ -527,7 +547,7 @@ func (ib *ImageBuilder) CleanImage(ctx context.Context, imageid string) error {
 	if err != nil {
 		return err
 	}
-	return ib.dl.SetBuildTimeMetric(id, "clean_completed")
+	return ib.dl.SetBuildTimeMetric(txn, id, "clean_completed")
 }
 
 // PushBuildToRegistry pushes the already built image and all associated tags to the
@@ -541,8 +561,12 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildR
 	if !ok {
 		return fmt.Errorf("build id missing from context")
 	}
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("New Relic transaction missing from context")
+	}
 	ib.logf(ctx, "pushing")
-	err := ib.dl.SetBuildTimeMetric(id, "push_started")
+	err := ib.dl.SetBuildTimeMetric(txn, id, "push_started")
 	if err != nil {
 		return err
 	}
@@ -575,7 +599,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildR
 		RegistryAuth: auth,
 	}
 	var output []lib.BuildEvent
-	inames, err := ib.getFullImageNames(req)
+	inames, err := ib.getFullImageNames(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -593,7 +617,7 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildR
 			return err
 		}
 	}
-	err = ib.dl.SetBuildTimeMetric(id, "push_completed")
+	err = ib.dl.SetBuildTimeMetric(txn, id, "push_completed")
 	if err != nil {
 		return err
 	}
@@ -601,12 +625,16 @@ func (ib *ImageBuilder) PushBuildToRegistry(ctx context.Context, req *lib.BuildR
 	return ib.saveOutput(ctx, Push, output)
 }
 
-func (ib *ImageBuilder) getCommitSHA(repo, ref string) (string, error) {
+func (ib *ImageBuilder) getCommitSHA(ctx context.Context, repo, ref string) (string, error) {
 	rl := strings.Split(repo, "/")
 	if len(rl) != 2 {
 		return "", fmt.Errorf("malformed GitHub repo: %v", repo)
 	}
-	csha, err := ib.gf.GetCommitSHA(rl[0], rl[1], ref)
+	txn, ok := buildcontext.NRTxnFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("New Relic transaction missing from context")
+	}
+	csha, err := ib.gf.GetCommitSHA(txn, rl[0], rl[1], ref)
 	if err != nil {
 		return "", fmt.Errorf("error getting commit SHA: %v", err)
 	}
@@ -618,7 +646,7 @@ func (ib *ImageBuilder) PushBuildToS3(ctx context.Context, imageid string, req *
 	if buildcontext.IsCancelled(ctx.Done()) {
 		return fmt.Errorf("push was cancelled: %v", ctx.Err())
 	}
-	csha, err := ib.getCommitSHA(req.Build.GithubRepo, req.Build.Ref)
+	csha, err := ib.getCommitSHA(ctx, req.Build.GithubRepo, req.Build.Ref)
 	if err != nil {
 		return err
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/dollarshaveclub/furan/lib/github_fetch"
 	"github.com/dollarshaveclub/furan/lib/grpc"
 	"github.com/dollarshaveclub/furan/lib/metrics"
+	"github.com/dollarshaveclub/furan/lib/mocks"
 	"github.com/dollarshaveclub/furan/lib/s3"
 	"github.com/dollarshaveclub/furan/lib/squasher"
 	"github.com/dollarshaveclub/furan/lib/stream_adapter"
@@ -101,7 +102,7 @@ func build(cmd *cobra.Command, args []string) {
 	}()
 
 	validateCLIBuildRequest()
-	vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, awscredsprefix)
+	vault.SetupVault(&vaultConfig, &awsConfig, &dockerConfig, &gitConfig, &serverConfig, awscredsprefix)
 	setupDB(initializeDB)
 
 	dnull, err := os.Open(os.DevNull)
@@ -150,7 +151,9 @@ func build(cmd *cobra.Command, args []string) {
 
 	logger = log.New(dnull, "", log.LstdFlags)
 
-	gs := grpc.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, kvo, 1, 1, logger)
+	nrapp := mocks.NullNewRelicApp{}
+
+	gs := grpc.NewGRPCServer(ib, dbConfig.Datalayer, kafkaConfig.Manager, kafkaConfig.Manager, mc, kvo, 1, 1, logger, nrapp)
 
 	resp, err := gs.StartBuild(ctx, &cliBuildRequest)
 	if err != nil {

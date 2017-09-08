@@ -3,7 +3,7 @@ services:
   docker:
     image: docker:stable-dind
     privileged: true
-    ports: 
+    ports:
       - "2375:2375"
   kafka:
     image: spotify/kafka
@@ -39,8 +39,8 @@ services:
       - VAULT_TOKEN=root
       - VAULT_ADDR=http://vault:8200
       - DOCKER_HOST=tcp://docker:2375
-    # delay startup to wait for other services to be ready and for network links to come up
-    command: /dc-run.sh
+    command: /go/bin/furan -k -i -n scylla -f kafka:9092 server --log-to-sumo=false --consul-addr consul:8500 --enable-newrelic=false --newrelic-app furan-local
+    restart: always
     ports:
       - "4000:4000"
       - "4001:4001"
