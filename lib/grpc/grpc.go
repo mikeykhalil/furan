@@ -249,6 +249,7 @@ func (gr *GrpcServer) monitorCancelled(ctx context.Context, cf context.CancelFun
 // Performs build synchronously
 func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (outcome lib.BuildStatusResponse_BuildState) {
 	var err error // so deferred finalize function has access to any error
+	var failed bool
 	var cf context.CancelFunc
 	ctx, cf = context.WithCancel(ctx)
 	defer cf()
@@ -260,7 +261,7 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (out
 	txn := gr.nrapp.StartTransaction("SyncBuild", nil, nil)
 	defer txn.End()
 	defer func() {
-		if err != nil {
+		if err != nil && failed {
 			txn.NoticeError(err)
 		}
 	}()
@@ -274,7 +275,7 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (out
 	go gr.monitorCancelled(ctx, cf)
 	// Finalize build and send event. Failures should set err and return the appropriate build state.
 	defer func(id gocql.UUID) {
-		failed := outcome == lib.BuildStatusResponse_BUILD_FAILURE || outcome == lib.BuildStatusResponse_PUSH_FAILURE
+		failed = outcome == lib.BuildStatusResponse_BUILD_FAILURE || outcome == lib.BuildStatusResponse_PUSH_FAILURE
 		flags := map[string]bool{
 			"failed":   failed,
 			"finished": true,
