@@ -70,11 +70,14 @@ func init() {
 	buildCmd.PersistentFlags().UintVar(&buildS3ErrorLogsPresignTTL, "s3-error-log-presign-ttl", 60*4, "Presigned error log URL TTL in minutes (0 to disable)")
 	buildCmd.PersistentFlags().StringVar(&consulConfig.Addr, "consul-addr", "127.0.0.1:8500", "Consul address (IP:port)")
 	buildCmd.PersistentFlags().StringVar(&consulConfig.KVPrefix, "consul-kv-prefix", "furan", "Consul KV prefix")
+	buildCmd.PersistentFlags().StringSliceVar(&buildArgs, "build-arg", []string{}, "Build arg to use for build request")
 	RootCmd.AddCommand(buildCmd)
 }
 
 func validateCLIBuildRequest() {
 	cliBuildRequest.Build.Tags = strings.Split(tags, ",")
+	cliBuildRequest.Build.Args = buildArgsFromSlice(buildArgs)
+
 	if cliBuildRequest.Push.Registry.Repo == "" &&
 		cliBuildRequest.Push.S3.Region == "" &&
 		cliBuildRequest.Push.S3.Bucket == "" &&
@@ -87,6 +90,19 @@ func validateCLIBuildRequest() {
 	if cliBuildRequest.Build.Ref == "" {
 		clierr("Source ref is required")
 	}
+}
+
+func buildArgsFromSlice(args []string) map[string]string {
+	buildArgs := make(map[string]string)
+	for _, arg := range args {
+		kv := strings.Split(arg, "=")
+		if len(kv) != 2 {
+			continue
+		}
+
+		buildArgs[kv[0]] = kv[1]
+	}
+	return buildArgs
 }
 
 func build(cmd *cobra.Command, args []string) {

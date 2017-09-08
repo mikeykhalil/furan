@@ -15,6 +15,7 @@ message BuildDefinition {
   string ref = 3; // sha/branch/tag
   repeated string tags = 4;
   bool tag_with_commit_sha = 5;
+  map<string, string> args = 6;
 }
 
 message PushRegistryDefinition {
