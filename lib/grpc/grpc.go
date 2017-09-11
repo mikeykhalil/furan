@@ -589,11 +589,11 @@ func (gr *GrpcServer) CancelBuild(ctx context.Context, req *lib.BuildCancelReque
 	return nil, grpc.Errorf(codes.DeadlineExceeded, "timed out waiting for build to stop")
 }
 
-// Shutdown gracefully stops the GRPC server, signals all workers and builds to stop and then waits for goroutines to finish
+// Shutdown gracefully stops the GRPC server, signals all workers to stop, waits for builds to finish (with timeout) and then waits for goroutines to finish
 func (gr *GrpcServer) Shutdown() {
-	gr.s.GracefulStop()           // stop GRPC server
-	gr.cancelWorkers()            // signal all workers to stop processing jobs
-	if ok := gr.abm.Wait(); !ok { // wait for builds to finish
+	gr.s.GracefulStop() // stop GRPC server
+	gr.cancelWorkers()  // signal all workers to stop processing jobs
+	if !gr.abm.Wait() { // wait for builds to finish
 		gr.logf("timeout waiting for builds to finish")
 	}
 	gr.wwg.Wait() // wait for workers to return
