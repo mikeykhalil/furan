@@ -37,6 +37,14 @@ func (abm *activeBuildMap) AddBuild(id gocql.UUID, cf context.CancelFunc) {
 	abm.m[id] = cf
 }
 
+func (abm *activeBuildMap) RemoveBuild(id gocql.UUID) {
+	abm.Lock()
+	defer abm.Unlock()
+	if _, ok := abm.m[id]; ok {
+		delete(abm.m, id)
+	}
+}
+
 func (abm *activeBuildMap) Cancel(id gocql.UUID) error {
 	abm.Lock()
 	defer abm.Unlock()
@@ -265,6 +273,7 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (out
 			txn.NoticeError(err)
 		}
 	}()
+	defer gr.abm.RemoveBuild(id)
 	ctx = buildcontext.NewNRTxnContext(ctx, txn)
 	gr.logf("syncBuild started: %v", id.String())
 	if err := gr.kvo.SetBuildRunning(id); err != nil {
