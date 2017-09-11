@@ -24,17 +24,46 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+const (
+	gracefulStopTimeout = 20 * time.Minute
+)
+
 // activeBuildMap contains a map of build ID to CancelFunc to allow cancellation
 type activeBuildMap struct {
 	sync.Mutex
 	m          map[gocql.UUID]context.CancelFunc
 	loggerFunc func(string, ...interface{})
+	wg         sync.WaitGroup
 }
 
 func (abm *activeBuildMap) AddBuild(id gocql.UUID, cf context.CancelFunc) {
 	abm.Lock()
 	defer abm.Unlock()
 	abm.m[id] = cf
+	abm.wg.Add(1)
+}
+
+func (abm *activeBuildMap) RemoveBuild(id gocql.UUID) {
+	abm.Lock()
+	defer abm.Unlock()
+	if _, ok := abm.m[id]; ok {
+		delete(abm.m, id)
+	}
+	abm.wg.Done()
+}
+
+func (abm *activeBuildMap) Wait() bool {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		abm.wg.Wait()
+	}()
+	select {
+	case <-c:
+		return true
+	case <-time.After(gracefulStopTimeout):
+		return false
+	}
 }
 
 func (abm *activeBuildMap) Cancel(id gocql.UUID) error {
@@ -265,6 +294,7 @@ func (gr *GrpcServer) syncBuild(ctx context.Context, req *lib.BuildRequest) (out
 			txn.NoticeError(err)
 		}
 	}()
+	defer gr.abm.RemoveBuild(id)
 	ctx = buildcontext.NewNRTxnContext(ctx, txn)
 	gr.logf("syncBuild started: %v", id.String())
 	if err := gr.kvo.SetBuildRunning(id); err != nil {
@@ -559,10 +589,12 @@ func (gr *GrpcServer) CancelBuild(ctx context.Context, req *lib.BuildCancelReque
 	return nil, grpc.Errorf(codes.DeadlineExceeded, "timed out waiting for build to stop")
 }
 
-// Shutdown gracefully stops the GRPC server, signals all workers and builds to stop and then waits for goroutines to finish
+// Shutdown gracefully stops the GRPC server, signals all workers to stop, waits for builds to finish (with timeout) and then waits for goroutines to finish
 func (gr *GrpcServer) Shutdown() {
 	gr.s.GracefulStop() // stop GRPC server
 	gr.cancelWorkers()  // signal all workers to stop processing jobs
-	gr.abm.CancelAll()  // cancel all running builds
-	gr.wwg.Wait()       // wait for workers to return
+	if !gr.abm.Wait() { // wait for builds to finish
+		gr.logf("timeout waiting for builds to finish")
+	}
+	gr.wwg.Wait() // wait for workers to return
 }
