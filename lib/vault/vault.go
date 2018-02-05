@@ -77,7 +77,7 @@ func GetAWSCreds(vaultConfig *config.Vaultconfig, pfx string) (string, string) {
 	}
 	ak, err := vc.GetValue(vaultPath(vaultConfig, pfx+"/access_key_id"))
 	if err != nil {
-		log.Fatalf("Error getting AWS access key ID: %v", err)
+		log.Fatalf("Error getting AWS access key ID: %v, vaultPath: %v", err, vaultPath(vaultConfig, pfx+"/access_key_id"))
 	}
 	sk, err := vc.GetValue(vaultPath(vaultConfig, pfx+"/secret_access_key"))
 	if err != nil {
