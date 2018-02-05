@@ -69,6 +69,7 @@ func SetupVault(vaultConfig *config.Vaultconfig, awsConfig *config.AWSConfig, do
 	awsConfig.SecretAccessKey = sk
 }
 
+// GetAWSCreds gets the AWS creds defined in Vault for the Vault Prefix/Aws Prefix defined.
 func GetAWSCreds(vaultConfig *config.Vaultconfig, pfx string) (string, string) {
 	vc, err := getVaultClient(vaultConfig)
 	if err != nil {
