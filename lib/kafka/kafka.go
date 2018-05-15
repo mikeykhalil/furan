@@ -73,6 +73,7 @@ func NewKafkaManager(brokers []string, topic string, maxsends uint, mc metrics.M
 	cconf.Version = pconf.Version
 	cconf.Net = pconf.Net
 	cconf.Consumer.Return.Errors = true
+	cconf.Consumer.Offsets.Initial = sarama.OffsetOldest
 
 	kp := &KafkaManager{
 		ap:           asyncp,
