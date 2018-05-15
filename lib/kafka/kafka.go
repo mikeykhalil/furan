@@ -21,7 +21,7 @@ const (
 	keepaliveSecs      = 5
 )
 
-var kafkaVersion = sarama.V0_10_0_0
+var kafkaVersion = sarama.V1_0_0_0
 
 // EventBusProducer describes an object capable of publishing events somewhere
 type EventBusProducer interface {
