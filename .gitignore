@@ -4,3 +4,4 @@ lib/testdata/*.tar.gz
 local_dev_secrets.local.json
 build
 releases
+.idea/
