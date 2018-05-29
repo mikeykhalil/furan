@@ -7,7 +7,6 @@ import (
 
 	"github.com/AlternativaPlatform/docker-registry-client/registry"
 	"github.com/dollarshaveclub/furan/lib/config"
-	"github.com/dollarshaveclub/go-lib/set"
 )
 
 // ImageTagChecker describes an object that can see if a tag exists for an image in a registry
@@ -54,11 +53,19 @@ func (rtc *RegistryTagChecker) AllTagsExist(tags []string, repo string) (bool, [
 		Client: hc,
 		Logf:   rtc.loggerFunc,
 	}
-	ts, err := reg.Tags(fmt.Sprintf("%v/%v", rs[1], rs[2]))
-	if err != nil {
-		return false, nil, fmt.Errorf("error getting tags for repo: %v: %v", repo, err)
+	missing := []string{}
+	for _, t := range tags {
+		m, err := reg.ManifestV2(fmt.Sprintf("%v/%v", rs[1], rs[2]), t)
+		if err != nil {
+			return false, nil, fmt.Errorf("error getting manifest: %v", err)
+		}
+		b, err := m.MarshalJSON()
+		if err != nil {
+			return false, nil, fmt.Errorf("error marshing json manifest: %v", err)
+		}
+		if strings.Contains(string(b), "\"MANIFEST_UNKNOWN\"") { // HACK
+			missing = append(missing, t)
+		}
 	}
-	lset := set.NewStringSet(tags)
-	inter := set.NewStringSet(ts).Intersection(lset)
-	return lset.IsEqual(inter), lset.Difference(inter).Items(), nil
+	return len(missing) == 0, missing, nil
 }
