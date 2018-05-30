@@ -84,6 +84,20 @@ func TestTagCheckerBadTags(t *testing.T) {
 	}
 }
 
+func TestTagCheckerUnsupportedRegistry(t *testing.T) {
+	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
+	ok, m, err := tc.AllTagsExist([]string{"foo", "bar"}, "acmecompany/repo")
+	if err != nil {
+		t.Fatalf("should have succeeded: %v", err)
+	}
+	if ok {
+		t.Fatalf("should have returned false")
+	}
+	if len(m) != 2 {
+		t.Fatalf("should have returned all tags as missing")
+	}
+}
+
 func TestTagCheckerQuayAllTagsExist(t *testing.T) {
 	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
 	ok, missing, err := tc.AllTagsExist(furanTestTags, "quay.io/dollarshaveclub/furan")
