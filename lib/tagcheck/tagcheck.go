@@ -50,12 +50,12 @@ func (rtc *RegistryTagChecker) AllTagsExist(tags []string, repo string) (bool, [
 	rs := strings.Split(repo, "/")
 	if len(rs) == 3 {
 		if rs[0] != "quay.io" {
-			rtc.loggerFunc("quay.io is the only supported repository for tag checking: %v", rs[0])
+			rtc.loggerFunc("quay.io is the only supported registry for tag checking: %v", rs[0])
 			return false, tags, nil
 		}
 	} else {
 		if len(rs) == 2 {
-			rtc.loggerFunc("quay.io is the only supported repository for tag checking: Docker Hub")
+			rtc.loggerFunc("quay.io is the only supported registry for tag checking: Docker Hub")
 			return false, tags, nil
 		}
 		return false, nil, fmt.Errorf("bad format for repo: expected [host]/[namespace]/[repository] or [namespace]/[repository]: %v", repo)
