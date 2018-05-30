@@ -146,3 +146,24 @@ func TestTagCheckerQuayPrivateRepoAllExist(t *testing.T) {
 		t.Fatalf("missing should be nil or empty: %v", missing)
 	}
 }
+
+func TestTagCheckerQuayPrivateRepoMissingTag(t *testing.T) {
+	dcfg, err := testReadDockercfg()
+	if err != nil {
+		t.Fatalf("error getting dockercfg: %v", err)
+	}
+	tc := NewRegistryTagChecker(dcfg, testLoggerFunc)
+	ok, missing, err := tc.AllTagsExist(append(testPrivateRepoTags, "missingtag123456790"), testPrivateRepo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatalf("should have returned false")
+	}
+	if len(missing) != 1 {
+		t.Fatalf("should have returned one missing tag")
+	}
+	if missing[0] != "missingtag123456790" {
+		t.Fatalf("bad missing tag: %v", missing[0])
+	}
+}

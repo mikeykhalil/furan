@@ -78,10 +78,16 @@ func (rtc *RegistryTagChecker) AllTagsExist(tags []string, repo string) (bool, [
 	g, _ := errgroup.WithContext(ctx)
 	missing := make([]string, len(tags))
 	for i := range tags {
+		t := tags[i]
 		g.Go(func() error {
-			t := tags[i]
 			m, err := reg.ManifestV2(fmt.Sprintf("%v/%v", rs[1], rs[2]), t)
 			if err != nil {
+				errmsg := err.Error()
+				// authenticated, private repo requests return a 404 error like this...
+				if strings.Contains(errmsg, "status=404") && strings.Contains(errmsg, `\"code\":\"MANIFEST_UNKNOWN\"`) {
+					missing[i] = t
+					return nil
+				}
 				return fmt.Errorf("error getting manifest: tag: %v: %v", t, err)
 			}
 			b, _ := m.MarshalJSON()
@@ -90,6 +96,7 @@ func (rtc *RegistryTagChecker) AllTagsExist(tags []string, repo string) (bool, [
 				return fmt.Errorf("error unmarshaling response: tag: %v: %v", t, err)
 			}
 			if len(me.Errors) > 0 {
+				// unauthenticated, public repo requests return status 200 but with this error message as the body...
 				if me.Errors[0].Code == tagMissingManifestErrorCode {
 					missing[i] = t
 				} else {
