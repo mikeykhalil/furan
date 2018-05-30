@@ -68,7 +68,7 @@ func testReadDockercfg() (*config.Dockerconfig, error) {
 	return &dconfig, nil
 }
 
-func TestTagCheckerAllTagsExistBadRepo(t *testing.T) {
+func TestTagCheckerBadRepo(t *testing.T) {
 	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
 	_, _, err := tc.AllTagsExist([]string{"foo", "bar"}, "thisisabadrepo")
 	if err == nil {
@@ -76,7 +76,7 @@ func TestTagCheckerAllTagsExistBadRepo(t *testing.T) {
 	}
 }
 
-func TestTagCheckerAllTagsExistBadTags(t *testing.T) {
+func TestTagCheckerBadTags(t *testing.T) {
 	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
 	_, _, err := tc.AllTagsExist([]string{}, "hub.docker.io/foo/bar")
 	if err == nil {
@@ -84,7 +84,21 @@ func TestTagCheckerAllTagsExistBadTags(t *testing.T) {
 	}
 }
 
-func TestTagCheckerAllTagsExist(t *testing.T) {
+func TestTagCheckerUnsupportedRegistry(t *testing.T) {
+	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
+	ok, m, err := tc.AllTagsExist([]string{"foo", "bar"}, "acmecompany/repo")
+	if err != nil {
+		t.Fatalf("should have succeeded: %v", err)
+	}
+	if ok {
+		t.Fatalf("should have returned false")
+	}
+	if len(m) != 2 {
+		t.Fatalf("should have returned all tags as missing")
+	}
+}
+
+func TestTagCheckerQuayAllTagsExist(t *testing.T) {
 	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
 	ok, missing, err := tc.AllTagsExist(furanTestTags, "quay.io/dollarshaveclub/furan")
 	if err != nil {
@@ -98,7 +112,7 @@ func TestTagCheckerAllTagsExist(t *testing.T) {
 	}
 }
 
-func TestTagCheckerAllTagsExistMissingTag(t *testing.T) {
+func TestTagCheckerQuayMissingTag(t *testing.T) {
 	tc := NewRegistryTagChecker(&config.Dockerconfig{}, testLoggerFunc)
 	ok, missing, err := tc.AllTagsExist(append(furanTestTags, "missingtag"), "quay.io/dollarshaveclub/furan")
 	if err != nil {
@@ -115,7 +129,7 @@ func TestTagCheckerAllTagsExistMissingTag(t *testing.T) {
 	}
 }
 
-func TestTagCheckerAllTagsExistPrivateRepoAllExist(t *testing.T) {
+func TestTagCheckerQuayPrivateRepoAllExist(t *testing.T) {
 	dcfg, err := testReadDockercfg()
 	if err != nil {
 		t.Fatalf("error getting dockercfg: %v", err)
