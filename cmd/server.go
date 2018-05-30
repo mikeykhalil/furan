@@ -59,6 +59,7 @@ var serverCmd = &cobra.Command{
 func init() {
 	serverCmd.PersistentFlags().UintVar(&serverConfig.HTTPSPort, "https-port", 4000, "REST HTTPS TCP port")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.GRPCPort, "grpc-port", 4001, "gRPC TCP port")
+	serverCmd.PersistentFlags().StringVar(&serverConfig.HealthcheckAddr, "healthcheck-addr", "0.0.0.0", "HTTP healthcheck listen address")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.HealthcheckHTTPport, "healthcheck-port", 4002, "Healthcheck HTTP port (listens on localhost only)")
 	serverCmd.PersistentFlags().UintVar(&serverConfig.PPROFPort, "pprof-port", 4003, "Port for serving pprof profiles")
 	serverCmd.PersistentFlags().StringVar(&serverConfig.HTTPSAddr, "https-addr", "0.0.0.0", "REST HTTPS listen address")
@@ -101,7 +102,7 @@ func setupServerLogger() {
 func healthcheck(ha *httphandlers.HTTPAdapter) {
 	r := mux.NewRouter()
 	r.HandleFunc("/health", ha.HealthHandler).Methods("GET")
-	addr := fmt.Sprintf("127.0.0.1:%v", serverConfig.HealthcheckHTTPport)
+	addr := fmt.Sprintf("%v:%v", serverConfig.HealthcheckAddr, serverConfig.HealthcheckHTTPport)
 	server := &http.Server{Addr: addr, Handler: r}
 	logger.Printf("HTTP healthcheck listening on: %v", addr)
 	logger.Println(server.ListenAndServe())
