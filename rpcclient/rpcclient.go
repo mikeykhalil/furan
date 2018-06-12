@@ -176,7 +176,7 @@ func (fc FuranClient) rpcerr(err error, msg string, params ...interface{}) error
 	return fmt.Errorf("rpc error: %v: %v: %v", msg, code.String(), err)
 }
 
-// Build starts and monitors a build synchronously, sending BuildEvents to out.
+// Build starts and monitors a build synchronously, sending BuildEvents to out and returning the build ID when completed, or error.
 // Returns an error if there was an RPC error or if the build/push fails
 // You must read from out (or provide a sufficiently buffered channel) to prevent Build from blocking forever
 func (fc FuranClient) Build(ctx context.Context, out chan *BuildEvent, req *BuildRequest) (string, error) {
