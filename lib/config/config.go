@@ -30,6 +30,10 @@ type Dockerconfig struct {
 	DockercfgContents  map[string]dtypes.AuthConfig
 }
 
+func (dc *Dockerconfig) Setup() {
+	dc.DockercfgContents = make(map[string]dtypes.AuthConfig)
+}
+
 type Kafkaconfig struct {
 	Brokers      []string
 	Topic        string

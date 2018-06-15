@@ -93,6 +93,7 @@ func clierr(msg string, params ...interface{}) {
 }
 
 func getDockercfg() error {
+	dockerConfig.Setup()
 	err := json.Unmarshal([]byte(dockerConfig.DockercfgRaw), &dockerConfig.DockercfgContents)
 	if err != nil {
 		return err
