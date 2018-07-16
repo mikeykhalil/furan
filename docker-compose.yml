@@ -13,7 +13,7 @@ services:
     environment:
       ADVERTISED_HOST: kafka
   scylla:
-    image: scylladb/scylla
+    image: scylladb/scylla:1.4.3
     ports:
       - "9042:9042"
     healthcheck:
