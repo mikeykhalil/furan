@@ -1,113 +1,98 @@
 package vault
 
 import (
-	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 
 	"github.com/dollarshaveclub/furan/lib/config"
-	"github.com/dollarshaveclub/go-lib/vaultclient"
+	"github.com/dollarshaveclub/pvc"
+	"github.com/pkg/errors"
 )
 
-func safeStringCast(v interface{}) string {
-	switch v := v.(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		log.Printf("Unknown type for Vault value: %T: %v", v, v)
-		return ""
+func getVaultClient(vaultConfig *config.Vaultconfig) (*pvc.SecretsClient, error) {
+	var opts []pvc.SecretsClientOption
+	if vaultConfig.Addr == "" {
+		return nil, errors.New("vault addr missing")
 	}
-}
-
-func getVaultClient(vaultConfig *config.Vaultconfig) (*vaultclient.VaultClient, error) {
-	vc, err := vaultclient.NewClient(&vaultclient.VaultConfig{
-		Server: vaultConfig.Addr,
-	})
-	if err != nil {
-		return vc, err
-	}
-	if vaultConfig.TokenAuth {
-		vc.TokenAuth(vaultConfig.Token)
-	} else {
-		if err = vc.AppIDAuth(vaultConfig.AppID, vaultConfig.UserIDPath); err != nil {
-			return vc, err
+	switch {
+	case vaultConfig.TokenAuth:
+		if vaultConfig.Token == "" {
+			return nil, errors.New("token auth specified but token is empty")
 		}
+		opts = []pvc.SecretsClientOption{pvc.WithVaultBackend(), pvc.WithVaultAuthentication(pvc.Token), pvc.WithVaultToken(vaultConfig.Token)}
+	case vaultConfig.AppID != "" && vaultConfig.UserIDPath != "":
+		opts = []pvc.SecretsClientOption{pvc.WithVaultBackend(), pvc.WithVaultAuthentication(pvc.AppID), pvc.WithVaultAppID(vaultConfig.AppID), pvc.WithVaultUserIDPath(vaultConfig.UserIDPath)}
+	case vaultConfig.K8sJWTPath != "" && vaultConfig.K8sRole != "":
+		jwt, err := ioutil.ReadFile(vaultConfig.K8sJWTPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "error reading JWT file")
+		}
+		opts = []pvc.SecretsClientOption{pvc.WithVaultBackend(), pvc.WithVaultAuthentication(pvc.K8s), pvc.WithVaultK8sAuth(string(jwt), vaultConfig.K8sRole)}
+	default:
+		return nil, errors.New("no authentication method was provided")
 	}
-	return vc, nil
-}
-
-func vaultPath(vaultConfig *config.Vaultconfig, path string) string {
-	return fmt.Sprintf("%v%v", vaultConfig.VaultPathPrefix, path)
+	opts = append(opts, pvc.WithVaultHost(vaultConfig.Addr))
+	opts = append(opts, pvc.WithMapping(vaultConfig.VaultPathPrefix+"/{{ .ID }}"))
+	return pvc.NewSecretsClient(opts...)
 }
 
 // SetupVault does generic Vault setup (all subcommands)
 func SetupVault(vaultConfig *config.Vaultconfig, awsConfig *config.AWSConfig, dockerConfig *config.Dockerconfig, gitConfig *config.Gitconfig, serverConfig *config.Serverconfig, awscredsprefix string) {
-	vc, err := getVaultClient(vaultConfig)
+	sc, err := getVaultClient(vaultConfig)
 	if err != nil {
 		log.Fatalf("Error creating Vault client: %v", err)
 	}
-	ght, err := vc.GetValue(vaultPath(vaultConfig, gitConfig.TokenVaultPath))
+	ght, err := sc.Get(gitConfig.TokenVaultPath)
 	if err != nil {
 		log.Fatalf("Error getting GitHub token: %v", err)
 	}
-	dcc, err := vc.GetValue(vaultPath(vaultConfig, dockerConfig.DockercfgVaultPath))
+	dcc, err := sc.Get(dockerConfig.DockercfgVaultPath)
 	if err != nil {
 		log.Fatalf("Error getting dockercfg: %v", err)
 	}
-	nrkey, err := vc.GetValue(vaultPath(vaultConfig, serverConfig.NewRelicAPIKeyVaultPath))
+	nrkey, err := sc.Get(serverConfig.NewRelicAPIKeyVaultPath)
 	if err != nil {
 		log.Fatalf("Error getting New Relic API key: %v", err)
 	}
-	gitConfig.Token = safeStringCast(ght)
-	dockerConfig.DockercfgRaw = safeStringCast(dcc)
-	serverConfig.NewRelicAPIKey = safeStringCast(nrkey)
-	ak, sk := GetAWSCreds(vaultConfig, awscredsprefix)
-	awsConfig.AccessKeyID = ak
-	awsConfig.SecretAccessKey = sk
-}
-
-func GetAWSCreds(vaultConfig *config.Vaultconfig, pfx string) (string, string) {
-	vc, err := getVaultClient(vaultConfig)
-	if err != nil {
-		log.Fatalf("Error creating Vault client: %v", err)
-	}
-	ak, err := vc.GetValue(vaultPath(vaultConfig, pfx+"/access_key_id"))
+	gitConfig.Token = string(ght)
+	dockerConfig.DockercfgRaw = string(dcc)
+	serverConfig.NewRelicAPIKey = string(nrkey)
+	ak, err := sc.Get(awscredsprefix + "/access_key_id")
 	if err != nil {
 		log.Fatalf("Error getting AWS access key ID: %v", err)
 	}
-	sk, err := vc.GetValue(vaultPath(vaultConfig, pfx+"/secret_access_key"))
+	sk, err := sc.Get(awscredsprefix + "/secret_access_key")
 	if err != nil {
 		log.Fatalf("Error getting AWS secret access key: %v", err)
 	}
-	return safeStringCast(ak), safeStringCast(sk)
+	awsConfig.AccessKeyID = string(ak)
+	awsConfig.SecretAccessKey = string(sk)
 }
 
 func GetSumoURL(vaultConfig *config.Vaultconfig, serverConfig *config.Serverconfig) {
-	vc, err := getVaultClient(vaultConfig)
+	sc, err := getVaultClient(vaultConfig)
 	if err != nil {
 		log.Fatalf("Error creating Vault client: %v", err)
 	}
-	scu, err := vc.GetValue(vaultPath(vaultConfig, serverConfig.VaultSumoURLPath))
+	scu, err := sc.Get(serverConfig.VaultSumoURLPath)
 	if err != nil {
 		log.Fatalf("Error getting SumoLogic collector URL: %v", err)
 	}
-	serverConfig.SumoURL = safeStringCast(scu)
+	serverConfig.SumoURL = string(scu)
 }
 
-// TLS cert/key are retrieved from Vault and must be written to temp files
+// WriteTLSCert fetches the TLS cert and key data from vault and writes to temporary files, the paths of which are returned
 func WriteTLSCert(vaultConfig *config.Vaultconfig, serverConfig *config.Serverconfig) (string, string) {
-	vc, err := getVaultClient(vaultConfig)
+	sc, err := getVaultClient(vaultConfig)
 	if err != nil {
 		log.Fatalf("Error creating Vault client: %v", err)
 	}
-	cert, err := vc.GetValue(vaultPath(vaultConfig, serverConfig.VaultTLSCertPath))
+	cert, err := sc.Get(serverConfig.VaultTLSCertPath)
 	if err != nil {
 		log.Fatalf("Error getting TLS certificate: %v", err)
 	}
-	key, err := vc.GetValue(vaultPath(vaultConfig, serverConfig.VaultTLSKeyPath))
+	key, err := sc.Get(serverConfig.VaultTLSKeyPath)
 	if err != nil {
 		log.Fatalf("Error getting TLS key: %v", err)
 	}
@@ -116,7 +101,7 @@ func WriteTLSCert(vaultConfig *config.Vaultconfig, serverConfig *config.Serverco
 		log.Fatalf("Error creating TLS certificate temp file: %v", err)
 	}
 	defer cf.Close()
-	_, err = cf.Write([]byte(safeStringCast(cert)))
+	_, err = cf.Write(cert)
 	if err != nil {
 		log.Fatalf("Error writing TLS certificate temp file: %v", err)
 	}
@@ -125,14 +110,14 @@ func WriteTLSCert(vaultConfig *config.Vaultconfig, serverConfig *config.Serverco
 		log.Fatalf("Error creating TLS key temp file: %v", err)
 	}
 	defer kf.Close()
-	_, err = kf.Write([]byte(safeStringCast(key)))
+	_, err = kf.Write(key)
 	if err != nil {
 		log.Fatalf("Error writing TLS key temp file: %v", err)
 	}
 	return cf.Name(), kf.Name()
 }
 
-// Clean up temp files
+// RmTempFiles cleans up temp files
 func RmTempFiles(f1 string, f2 string) {
 	for _, v := range []string{f1, f2} {
 		err := os.Remove(v)

@@ -13,6 +13,8 @@ var description = "unknown"
 type Vaultconfig struct {
 	Addr            string
 	Token           string
+	K8sJWTPath      string
+	K8sRole         string
 	TokenAuth       bool
 	AppID           string
 	UserIDPath      string

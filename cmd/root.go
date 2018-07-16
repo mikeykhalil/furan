@@ -67,6 +67,8 @@ func Execute() {
 func init() {
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.Addr, "vault-addr", "a", os.Getenv("VAULT_ADDR"), "Vault URL")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.Token, "vault-token", "t", os.Getenv("VAULT_TOKEN"), "Vault token (if using token auth)")
+	RootCmd.PersistentFlags().StringVar(&vaultConfig.K8sJWTPath, "vault-k8s-jwt-path", os.Getenv("VAULT_K8s_JWT_PATH"), "Path to file containing K8s service account JWT, for k8s Vault authentication")
+	RootCmd.PersistentFlags().StringVar(&vaultConfig.K8sRole, "vault-k8s-role", os.Getenv("VAULT_K8s_ROLE"), "Vault role name for use in k8s Vault authentication")
 	RootCmd.PersistentFlags().BoolVarP(&vaultConfig.TokenAuth, "vault-token-auth", "k", false, "Use Vault token-based auth")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.AppID, "vault-app-id", "p", os.Getenv("APP_ID"), "Vault App-ID")
 	RootCmd.PersistentFlags().StringVarP(&vaultConfig.UserIDPath, "vault-user-id-path", "u", os.Getenv("USER_ID_PATH"), "Path to file containing Vault User-ID")
