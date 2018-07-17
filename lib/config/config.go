@@ -15,6 +15,7 @@ type Vaultconfig struct {
 	Token           string
 	K8sJWTPath      string
 	K8sRole         string
+	K8sAuthPath     string
 	TokenAuth       bool
 	AppID           string
 	UserIDPath      string

@@ -28,11 +28,13 @@ func getVaultClient(vaultConfig *config.Vaultconfig) (*pvc.SecretsClient, error)
 		if err != nil {
 			return nil, errors.Wrap(err, "error reading JWT file")
 		}
-		opts = []pvc.SecretsClientOption{pvc.WithVaultBackend(), pvc.WithVaultAuthentication(pvc.K8s), pvc.WithVaultK8sAuth(string(jwt), vaultConfig.K8sRole)}
+		opts = []pvc.SecretsClientOption{pvc.WithVaultBackend(), pvc.WithVaultAuthentication(pvc.K8s), pvc.WithVaultK8sAuth(string(jwt), vaultConfig.K8sRole), pvc.WithVaultK8sAuthPath(vaultConfig.K8sAuthPath)}
 	default:
 		return nil, errors.New("no authentication method was provided")
 	}
 	opts = append(opts, pvc.WithVaultHost(vaultConfig.Addr))
+	opts = append(opts, pvc.WithVaultAuthRetries(5))
+	opts = append(opts, pvc.WithVaultAuthRetryDelay(2))
 	opts = append(opts, pvc.WithMapping(vaultConfig.VaultPathPrefix+"/{{ .ID }}"))
 	return pvc.NewSecretsClient(opts...)
 }
