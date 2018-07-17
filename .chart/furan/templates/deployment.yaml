@@ -1,0 +1,114 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: {{ template "fullname" . }}
+  labels:
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+spec:
+  strategy:
+    rollingUpdate:
+      maxSurge: {{ .Values.maxSurge }}
+      maxUnavailable: {{ .Values.maxUnavailable }}
+    type: RollingUpdate
+  replicas: {{ .Values.replicaCount }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "fullname" . }}
+        appsel: furan
+    spec:
+      {{ if .Values.vault.k8s_auth }}
+      serviceAccountName: {{ .Values.vault.serviceaccount }}
+      {{ end }}
+      dnsPolicy: Default
+      imagePullSecrets:
+        - name: "{{ .Values.image.pullSecrets }}"
+      volumes:
+      - name: docker-engine
+        emptyDir: {}
+      - name: docker-data
+      {{ if eq .Values.ramdisk.enabled true }}
+        emptyDir:
+          medium: Memory
+          sizeLimit: {{ .Values.ramdisk.size }}
+      {{ else }}
+        emptyDir: {}
+      {{ end }}
+      containers:
+      - name: docker
+        image: docker:17.06.1-ce-dind
+        imagePullPolicy: Always
+        args:
+          - --storage-driver=overlay2
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: docker-engine
+          mountPath: /var/run
+        - name: docker-data
+          mountPath: /var/lib/docker
+        resources:
+{{ toYaml .Values.docker_resources | indent 10 }}
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - /go/bin/furan
+          - -z
+          - -f
+          - {{ .Values.db.addrs }}
+          - -x
+          - {{ .Values.vault.prefix }}
+        {{ if .Values.vault.k8s_auth }}
+          - '--vault-k8s-jwt-path'
+          - /var/run/secrets/kubernetes.io/serviceaccount/token
+          - '--vault-k8s-role'
+          - '{{ .Values.vault.role }}'
+          - '--vault-k8s-auth-path'
+          - '{{ .Values.vault.auth_path }}'
+        {{ end }}
+          - server
+          - --log-to-sumo=false
+          - --s3-error-logs
+          - --s3-error-log-bucket
+          - {{ .Values.s3_error_log_bucket }}
+          - --docker-storage-path
+          - /opt/docker-storage
+          - --dogstatsd-addr={{ .Values.dogstatsdAddr }}
+          - --consul-addr={{ .Values.consul_addr }}
+      {{ if eq .Values.app.use_newrelic true }}
+          - --enable-newrelic
+          - --newrelic-app={{ .Values.app.newrelic_app_name }}
+      {{ end }}
+        env:
+        - name: DOCKER_HOST
+          value: unix:///var/run/docker.sock
+        - name: VAULT_ADDR
+          value: {{ .Values.vault.addr }}
+        - name: CONSUL_HTTP_ADDR
+          value: {{ .Values.consul_addr }}
+        ports:
+        - containerPort: {{ .Values.service.internalPort }}
+        volumeMounts:
+        - name: docker-engine
+          mountPath: /var/run
+        livenessProbe:
+          initialDelaySeconds: 100
+          timeoutSeconds: 1
+          periodSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+          httpGet:
+            path: {{ .Values.service.httpHealthcheckPath }}
+            port: {{ .Values.service.httpHealthcheckPort }}
+        readinessProbe:
+          initialDelaySeconds: 10
+          timeoutSeconds: 1
+          periodSeconds: 2
+          successThreshold: 1
+          failureThreshold: 1
+          httpGet:
+            path: {{ .Values.service.httpHealthcheckPath }}
+            port: {{ .Values.service.httpHealthcheckPort }}
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
