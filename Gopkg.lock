@@ -149,7 +149,7 @@
   branch = "master"
   name = "github.com/dollarshaveclub/pvc"
   packages = ["."]
-  revision = "d0c2ac35d9452422b7f128122aaacfaceaef1a07"
+  revision = "f59350de380e4804bcbba202f2de2cc9a9ad6599"
 
 [[projects]]
   branch = "master"
