@@ -141,10 +141,15 @@
   name = "github.com/dollarshaveclub/go-lib"
   packages = [
     "cassandra",
-    "set",
-    "vaultclient"
+    "set"
   ]
   revision = "513684cd3de465f588582db32fe6a24acf6dab3c"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/dollarshaveclub/pvc"
+  packages = ["."]
+  revision = "f59350de380e4804bcbba202f2de2cc9a9ad6599"
 
 [[projects]]
   branch = "master"
@@ -169,12 +174,6 @@
   packages = ["."]
   revision = "ded5959c0d4e360646dc9e9908cff48666781367"
   version = "v1.0.2"
-
-[[projects]]
-  name = "github.com/fatih/structs"
-  packages = ["."]
-  revision = "a720dfa8df582c51dee1b36feabb906bde1588bd"
-  version = "v1.0"
 
 [[projects]]
   name = "github.com/go-ini/ini"
@@ -272,9 +271,21 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/hashicorp/go-retryablehttp"
+  packages = ["."]
+  revision = "3b087ef2d313afe6c55b2f511d20db04ca767075"
+
+[[projects]]
+  branch = "master"
   name = "github.com/hashicorp/go-rootcerts"
   packages = ["."]
   revision = "6bb64b370b90e7ef1fa532be9e591a81c3493e00"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/hashicorp/go-sockaddr"
+  packages = ["."]
+  revision = "6d291a969b86c4b633730bfc6b8b9d64c3aafed9"
 
 [[projects]]
   branch = "master"
@@ -303,10 +314,13 @@
   packages = [
     "api",
     "helper/compressutil",
-    "helper/jsonutil"
+    "helper/hclutil",
+    "helper/jsonutil",
+    "helper/parseutil",
+    "helper/strutil"
   ]
-  revision = "0b20ae0b9b7a748d607082b1add3663a28e31b68"
-  version = "v0.7.3"
+  revision = "533003e27840d9646cb4e7d23b3a113895da1dd0"
+  version = "v0.10.3"
 
 [[projects]]
   branch = "master"
@@ -364,16 +378,22 @@
   version = "v0.1.1"
 
 [[projects]]
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/rcrowley/go-metrics"
   packages = ["."]
   revision = "1f30fe9094a513ce4c700b9a54458bbb0c96996c"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/sethgrid/pester"
+  name = "github.com/ryanuber/go-glob"
   packages = ["."]
-  revision = "99271bb5a99e5769f688c483eabb3c22d71ebf93"
+  revision = "572520ed46dbddaed19ea3d9541bdd0494163693"
+  version = "v0.1"
 
 [[projects]]
   branch = "master"
@@ -443,6 +463,12 @@
   revision = "6353ef0f924300eea566d3438817aa4d3374817e"
 
 [[projects]]
+  branch = "master"
+  name = "golang.org/x/time"
+  packages = ["rate"]
+  revision = "fbb02b2291d28baffd63558aa44b4b56f178d650"
+
+[[projects]]
   name = "google.golang.org/appengine"
   packages = [
     ".",
@@ -495,6 +521,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "79dfe6c68080e72a4d05814c087bddee445223deac41b7570b9cc348cbe1a7db"
+  inputs-digest = "35a65b4afa61aa9e4266c591accbedf7e759cb2617cc2dc8677dd514e52d859b"
   solver-name = "gps-cdcl"
   solver-version = 1
