@@ -1,4 +1,4 @@
-furan
+/furan
 lib/models.pb.go
 lib/testdata/*.tar.gz
 local_dev_secrets.local.json
