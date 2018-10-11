@@ -95,7 +95,7 @@ func (sm *S3StorageManager) Push(desc ImageDescription, in io.Reader, opts inter
 		return err
 	}
 	d := time.Now().UTC().Sub(started).Seconds()
-	sm.mc.Duration("s3.push.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
+	sm.duration("s3.push.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
 	return nil
 }
 
@@ -120,7 +120,7 @@ func (sm *S3StorageManager) Pull(desc ImageDescription, out io.WriterAt, opts in
 		return err
 	}
 	duration := time.Now().UTC().Sub(started).Seconds()
-	sm.mc.Duration("s3.pull.duration", desc.GitHubRepo, desc.CommitSHA, nil, duration)
+	sm.duration("s3.pull.duration", desc.GitHubRepo, desc.CommitSHA, nil, duration)
 	sm.logf("S3 bytes read: %v", n)
 	return nil
 }
@@ -244,6 +244,12 @@ func (sm *S3StorageManager) WriteFile(name string, desc ImageDescription, conten
 	}
 
 	d := time.Now().UTC().Sub(started).Seconds()
-	sm.mc.Duration("s3.write_file.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
+	sm.duration("s3.write_file.duration", desc.GitHubRepo, desc.CommitSHA, nil, d)
 	return loc, nil
+}
+
+func (sm *S3StorageManager) duration(name, repo, sha string, tags []string, d float64) {
+	if sm.mc != nil {
+		sm.mc.Duration(name, repo, sha, tags, d)
+	}
 }
