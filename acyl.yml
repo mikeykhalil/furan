@@ -1,0 +1,28 @@
+---
+version: 2
+
+target_branches:
+  - master
+
+application:
+  chart_path: '.helm/charts/furan'
+  chart_vars_path: .helm/charts/furan/values.yaml
+  image: quay.io/dollarshaveclub/furan
+
+dependencies:
+  direct:
+    - name: kafka
+      chart_path: '.helm/charts/kafka'
+      chart_vars_path: '.helm/charts/kafka/values.yaml'
+    - name: zookeeper
+      chart_path: '.helm/charts/zookeeper'
+      chart_vars_path: '.helm/charts/zookeeper/values.yaml'
+    - name: scylladb
+      chart_path: '.helm/charts/scylladb'
+      chart_vars_path:  '.helm/charts/scylladb/values.yaml'
+    - name: consul
+      chart_path: '.helm/charts/consul'
+      chart_vars_path: '.helm/charts/consul/values.yaml'
+    - name: vault
+      chart_path: '.helm/charts/vault'
+      chart_vars_path: '.helm/charts/vault/values.yaml'
