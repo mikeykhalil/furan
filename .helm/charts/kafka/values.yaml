@@ -1,0 +1,38 @@
+# Default values for kafka.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+image:
+  pullPolicy: Always
+
+livenessProbe:
+  initialDelaySeconds: 100
+  timeoutSeconds: 1
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+  httpGet:
+    path: "/"
+
+readinessProbe:
+  initialDelaySeconds: 10
+  timeoutSeconds: 1
+  periodSeconds: 2
+  successThreshold: 1
+  failureThreshold: 1
+  httpGet:
+    path: "/"
+
+kafka:
+  imageTag: latest
+  app:
+    brokerId: 1
+  service:
+    type: ClusterIP
+    name: kafka
+    internalPort: 9092
+    externalPort: 9092
+
+zookeeper:
+  service:
+    internalPort: 2181
+    externalPort: 2181

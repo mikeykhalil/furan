@@ -1,0 +1,37 @@
+# Default values for furan.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+replicaCount: 8
+maxSurge: 25%
+maxUnavailable: 25%
+env: qa
+image:
+  repository: quay.io/dollarshaveclub/furan
+  tag: master
+  pullPolicy: Always
+  pullSecrets: image-pull-secrets
+
+service:
+  httpInternalPort: 4000
+  grpcInternalPort: 4001
+  httpHealthcheckPort: 4002
+  httpHealthcheckPath: /health
+  performanceProfilingPort: 4003
+
+db: 
+  nodes: "scylladb" 
+  kafkaBrokers: "kafka:9092"
+
+vault:
+  addr: "vault:8200"
+  token: "root"
+
+consul_addr: "consul:8500"
+
+ramdisk:
+  enabled: false
+
+app:
+  use_newrelic: false
+  newrelic_app_name: furan-local
+  

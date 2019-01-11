@@ -1,0 +1,7 @@
+# Pulled chart from here: 
+# https://github.com/scylladb/scylla-code-samples/blob/master/helm-chart-scylla/Chart.yaml
+apiVersion: v1
+appVersion: "0.1.0"
+description: A Helm chart for Kubernetes
+name: scylladb
+version: 0.1.0

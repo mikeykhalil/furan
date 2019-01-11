@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment # Note (mk): This was switched from a Stateful set for the sake of simplicity
+metadata:
+  name: {{ template "scylladb.fullname" . }}
+  labels:
+    app: {{ template "scylladb.name" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "scylladb.name" . }}
+  serviceName: {{ template "scylladb.fullname" . }}
+  replicas: 1 # Note (mk): Making this 1 simplifies things a bit. All logic to support a scylla cluster has been removed. 
+  template:
+    metadata:
+      labels:
+        app: {{ template "scylladb.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+      - name: {{ template "scylladb.fullname" . }}
+        image: {{ .Values.image.repository }}
+        resources: 
+{{ toYaml .Values.resources | indent 10 }}
+        ports:
+          - containerPort: {{ .Values.service.cqlPort }}
+        args:
+          {{- if .Values.config.overprovisioned }}
+          - --overprovisioned
+          - {{ .Values.config.overprovisioned | quote }}
+          {{- end }}
+        readinessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "exec", "/opt/ready-probe.sh"]
+          initialDelaySeconds: 15
+          timeoutSeconds: 5
+        volumeMounts:
+          - name: scylla-ready-probe
+            mountPath: /opt/ready-probe.sh
+      volumes:
+        - name: scylla-ready-probe
+          configMap:
+            name: scylla 

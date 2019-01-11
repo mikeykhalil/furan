@@ -4,3 +4,14 @@ lib/testdata/*.tar.gz
 local_dev_secrets.local.json
 build
 releases
+
+# Whitelist of release yaml files
+!.helm/releases/consul/dqa.yaml
+!.helm/releases/furan/dqa.yaml
+!.helm/releases/kafka/dqa.yaml
+!.helm/releases/scylladb/dqa.yaml
+!.helm/releases/vault/dqa.yaml
+
+# Todo (mk): remove these files + gitignore when ready for PR
+create-environment.sh
+destroy-environment.sh
