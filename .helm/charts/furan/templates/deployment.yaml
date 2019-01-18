@@ -1,4 +1,4 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ template "fullname" . }}
@@ -11,6 +11,10 @@ spec:
       maxUnavailable: {{ .Values.maxUnavailable }}
     type: RollingUpdate
   replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "fullname" . }}
+      appsel: furan
   template:
     metadata:
       labels:

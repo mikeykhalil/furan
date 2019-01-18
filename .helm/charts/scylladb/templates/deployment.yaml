@@ -1,4 +1,4 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ template "scylladb.fullname" . }}
@@ -8,10 +8,11 @@ metadata:
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: {{ template "scylladb.name" . }}
-  replicas: 1
+      release: {{ .Release.Name }}
   template:
     metadata:
       labels:
@@ -37,7 +38,7 @@ spec:
           livenessProbe:
             exec:
               command: ["/bin/sh", "-c", "/k8s/liveness-probe.sh"]
-            initialDelaySeconds: 15
+            initialDelaySeconds: 60
             failureThreshold: 2
             successThreshold: 1
           readinessProbe:
@@ -45,6 +46,8 @@ spec:
               command: ["/bin/sh", "-c", "/k8s/liveness-probe.sh"]
             failureThreshold: 2
             successThreshold: 1
+            initialDelaySeconds: 10
+
       volumes:
         - name: scylla-scripts
           configMap:
