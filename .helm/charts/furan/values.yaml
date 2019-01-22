@@ -17,20 +17,20 @@ service:
 
   httpInternalPort: 4000
   httpExternalPort: 4000
-  httpServiceName: http
 
   grpcInternalPort: 4001
   grpcExternalPort: 4001
-  grpcServiceName: grpc
 
   httpHealthcheckPort: 4002
   httpHealthcheckPath: /health
   performanceProfilingPort: 4003
 
 dbNodes: "scylladb"
+initializeDb: true
 kafkaBrokers: "kafka-furan:9092"
 
 vault:
+  useTokenBasedAuth: true
   addr: "http://vault:8200"
   token: "root"
 

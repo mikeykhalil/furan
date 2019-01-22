@@ -58,8 +58,12 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         args:
           - /go/bin/furan
+        {{ if eq .Values.vault.useTokenBasedAuth true }}
           - -k
+        {{ end }}
+        {{ if eq .Values.initializeDb true }}
           - -i
+        {{ end }}
         {{ if .Values.dbNodes }}
           - -n
           - {{ .Values.dbNodes }}
@@ -71,7 +75,7 @@ spec:
         {{ if .Values.vault.prefix}}
           - -x
           - {{ .Values.vault.prefix }}
-          {{ end }}
+        {{ end }}
         {{ if .Values.vault.k8s_auth }}
           - '--vault-k8s-jwt-path'
           - /var/run/secrets/kubernetes.io/serviceaccount/token

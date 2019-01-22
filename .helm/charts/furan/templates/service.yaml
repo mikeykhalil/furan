@@ -11,11 +11,11 @@ spec:
   - port: {{ .Values.service.httpExternalPort }}
     targetPort: {{ .Values.service.httpInternalPort }}
     protocol: TCP
-    name: {{ .Values.service.httpServiceName }}
+    name: http
   - port: {{ .Values.service.grpcExternalPort }}
     targetPort: {{ .Values.service.grpcInternalPort }}
     protocol: TCP
-    name: {{ .Values.service.grpcServiceName }}
+    name: grpc
   selector:
     appsel: furan
 {{- end -}}
