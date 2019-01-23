@@ -14,6 +14,8 @@ dependencies:
     - name: kafka
       chart_path: '.helm/charts/kafka'
       chart_vars_path: '.helm/charts/kafka/values.yaml'
+      requires:
+        - zookeeper
     - name: zookeeper
       chart_path: '.helm/charts/zookeeper'
       chart_vars_path: '.helm/charts/zookeeper/values.yaml'
