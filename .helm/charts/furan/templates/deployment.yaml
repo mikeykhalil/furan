@@ -1,4 +1,4 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ template "fullname" . }}
@@ -11,6 +11,10 @@ spec:
       maxUnavailable: {{ .Values.maxUnavailable }}
     type: RollingUpdate
   replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "fullname" . }}
+      appsel: furan
   template:
     metadata:
       labels:
@@ -20,7 +24,7 @@ spec:
       {{ if .Values.vault.k8s_auth }}
       serviceAccountName: {{ .Values.vault.serviceaccount }}
       {{ end }}
-      dnsPolicy: Default
+      dnsPolicy: {{ .Values.dnsPolicy }}
       imagePullSecrets:
         - name: "{{ .Values.image.pullSecrets }}"
       volumes:
@@ -54,11 +58,24 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         args:
           - /go/bin/furan
+        {{ if eq .Values.vault.useTokenBasedAuth true }}
+          - -k
+        {{ end }}
+        {{ if eq .Values.initializeDb true }}
+          - -i
+        {{ end }}
+        {{ if .Values.dbNodes }}
+          - -n
+          - {{ .Values.dbNodes }}
+        {{ else }}
           - -z
+        {{ end }}
           - -f
-          - {{ .Values.db.addrs }}
+          - {{ .Values.kafkaBrokers }}
+        {{ if .Values.vault.prefix}}
           - -x
           - {{ .Values.vault.prefix }}
+        {{ end }}
         {{ if .Values.vault.k8s_auth }}
           - '--vault-k8s-jwt-path'
           - /var/run/secrets/kubernetes.io/serviceaccount/token
@@ -69,26 +86,35 @@ spec:
         {{ end }}
           - server
           - --log-to-sumo=false
+        {{ if .Values.s3_error_log_bucket }}
           - --s3-error-logs
           - --s3-error-log-bucket
           - {{ .Values.s3_error_log_bucket }}
+        {{ end }}
           - --docker-storage-path
           - /opt/docker-storage
+        {{ if .Values.dogstatsdAddr }}
           - --dogstatsd-addr={{ .Values.dogstatsdAddr }}
-          - --consul-addr={{ .Values.consul_addr }}
-      {{ if eq .Values.app.use_newrelic true }}
+        {{ end }}
+          - --consul-addr={{ .Values.consulAddr }}
+        {{ if eq .Values.app.useNewRelic true }}
           - --enable-newrelic
-          - --newrelic-app={{ .Values.app.newrelic_app_name }}
-      {{ end }}
+          - --newrelic-app={{ .Values.app.newRelicAppName }}
+        {{ end }}
         env:
         - name: DOCKER_HOST
           value: unix:///var/run/docker.sock
         - name: VAULT_ADDR
           value: {{ .Values.vault.addr }}
+        - name: VAULT_TOKEN
+          value: {{ .Values.vault.token }}
         - name: CONSUL_HTTP_ADDR
-          value: {{ .Values.consul_addr }}
+          value: {{ .Values.consulAddr }}
         ports:
-        - containerPort: {{ .Values.service.internalPort }}
+        - containerPort: {{ .Values.service.httpInternalPort }}
+        - containerPort: {{ .Values.service.grpcInternalPort }}
+        - containerPort: {{ .Values.service.httpHealthcheckPort }}
+        - containerPort: {{ .Values.service.performanceProfilingPort }}
         volumeMounts:
         - name: docker-engine
           mountPath: /var/run
